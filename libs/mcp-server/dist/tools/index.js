@@ -81,12 +81,50 @@ export function createToolHandlers(client) {
             },
         },
         symcon_get_variable: {
-            description: 'Liefert Variablen-Infos (IPS_GetVariable).',
+            description: 'Liefert Variablen-Infos (IPS_GetVariable). Enthält u. a. Variablentyp (Boolean, Integer, …) – wichtig, um zu wissen, wie man „Licht aus“ umsetzt (z. B. Boolean false, Dimmer 0).',
             inputSchema: variableIdSchema,
             handler: async (args) => {
                 const { variableId } = getArgs(args);
                 const v = await client.getVariable(variableId);
                 return { content: [{ type: 'text', text: JSON.stringify(v, null, 2) }] };
+            },
+        },
+        symcon_get_object_tree: {
+            description: 'Liefert den Objektbaum ab einer Wurzel (Discovery). Jeder Knoten: ObjectID, Name, ObjectType (0=Kategorie, 1=Instanz, 2=Variable), children. Die KI soll zuerst diesen Baum aufrufen, die Struktur sinnhaft verstehen (welcher Ort, welches Gerät), dann passend steuern.',
+            inputSchema: z.object({
+                rootId: z.number().int().min(0).optional().describe('Wurzel (0 = Root); Standard 0'),
+                maxDepth: z.number().int().min(1).max(6).optional().describe('Maximale Tiefe (Standard 4)'),
+            }),
+            handler: async (args) => {
+                const { rootId = 0, maxDepth = 4 } = getArgs(args);
+                const buildTree = async (id, depth) => {
+                    let name = 'Root';
+                    let objectType = 0;
+                    if (id > 0) {
+                        try {
+                            const obj = (await client.getObject(id));
+                            name = String(obj?.Name ?? '').trim() || `Objekt ${id}`;
+                            objectType = Number(obj?.ObjectType ?? 0);
+                        }
+                        catch {
+                            return { ObjectID: id, Name: `(Fehler beim Laden)`, ObjectType: -1, children: [] };
+                        }
+                    }
+                    const childIds = await client.getChildrenIds(id);
+                    const children = depth < maxDepth
+                        ? await Promise.all(childIds.map((cid) => buildTree(cid, depth + 1)))
+                        : [];
+                    return { ObjectID: id, Name: name, ObjectType: objectType, children };
+                };
+                const tree = await buildTree(rootId, 0);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(tree, null, 2) + '\n\nObjectType: 0=Kategorie, 1=Instanz, 2=Variable. Bei Variable: ObjectID = VariableID für SetValue/RequestAction.',
+                        },
+                    ],
+                };
             },
         },
         symcon_control_device: {
