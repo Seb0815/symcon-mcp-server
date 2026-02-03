@@ -22,6 +22,15 @@
     },
     {
       "type": "Label",
+      "caption": "Optional: API-Key zum Schutz des MCP-Servers. Wenn gesetzt, müssen Clients den Key mitsenden (Header \"Authorization: Bearer <Key>\" oder \"X-MCP-API-Key: <Key>\"). Leer = keine Authentifizierung."
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "ApiKey",
+      "caption": "API-Key (optional)"
+    },
+    {
+      "type": "Label",
       "caption": "Wenn aktiviert, startet der MCP-Server beim Klick auf \"Änderungen übernehmen\". Deaktiviert oder erneutes Übernehmen beendet ihn."
     },
     {

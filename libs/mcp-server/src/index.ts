@@ -1,9 +1,10 @@
 /**
  * Symcon MCP Server – Streamable HTTP entry point.
- * Reads MCP_PORT and SYMCON_API_URL from environment (set by Symcon module).
+ * Reads MCP_PORT, SYMCON_API_URL, MCP_AUTH_TOKEN from environment (set by Symcon module).
  */
 
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { SymconClient } from './symcon/SymconClient.js';
@@ -11,8 +12,29 @@ import { createToolHandlers } from './tools/index.js';
 
 const PORT = parseInt(process.env.MCP_PORT ?? '4096', 10);
 const SYMCON_API_URL = process.env.SYMCON_API_URL ?? 'http://127.0.0.1:3777/api/';
+/** Optional: if set, requests must send Authorization: Bearer <token> or X-MCP-API-Key: <token> */
+const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN ?? '';
 /** Bind on all interfaces (0.0.0.0) so the server is reachable at http://<SymBox-IP>:PORT from your Mac/PC. */
 const HOST = process.env.MCP_BIND ?? '0.0.0.0';
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  if (bufA.length === 0) return true;
+  return timingSafeEqual(bufA, bufB);
+}
+
+function isAuthorized(req: IncomingMessage): boolean {
+  if (!MCP_AUTH_TOKEN) return true;
+  const authHeader = req.headers.authorization;
+  const apiKeyHeader = req.headers['x-mcp-api-key'];
+  const bearer = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7).trim()
+    : '';
+  const key = typeof apiKeyHeader === 'string' ? apiKeyHeader.trim() : '';
+  return constantTimeEqual(bearer, MCP_AUTH_TOKEN) || constantTimeEqual(key, MCP_AUTH_TOKEN);
+}
 
 function readBody(req: import('node:http').IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -63,7 +85,12 @@ async function main(): Promise<void> {
   });
   await mcp.connect(transport);
 
-  const server = createServer(async (req, res) => {
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    if (!isAuthorized(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized', message: 'Missing or invalid API key' }));
+      return;
+    }
     const origin = req.headers.origin;
     const allowedOrigins = [`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`];
     if (origin && !allowedOrigins.includes(origin) && HOST === '127.0.0.1') {
@@ -78,6 +105,7 @@ async function main(): Promise<void> {
   server.listen(PORT, HOST, () => {
     process.stderr.write(`Symcon MCP Server listening on port ${PORT} (${HOST === '0.0.0.0' ? 'all interfaces, use http://<SymBox-IP>:' + PORT : HOST + ':' + PORT})\n`);
     process.stderr.write(`Symcon API: ${SYMCON_API_URL}\n`);
+    if (MCP_AUTH_TOKEN) process.stderr.write('Auth: API key required (Authorization: Bearer or X-MCP-API-Key)\n');
   });
 }
 

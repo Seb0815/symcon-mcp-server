@@ -18,8 +18,9 @@ Ausführlich: [ANLEITUNG_INSTALLATION.md](ANLEITUNG_INSTALLATION.md).
 
 ## Konfiguration
 
-- **Port:** TCP-Port für den MCP-Server (Streamable HTTP). Nur localhost (127.0.0.1).
+- **Port:** TCP-Port für den MCP-Server (Streamable HTTP).
 - **Symcon API URL:** Basis-URL der Symcon JSON-RPC API (z. B. `http://127.0.0.1:3777/api/`).
+- **API-Key (optional):** Wenn gesetzt, müssen Clients den Key mitsenden (Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>`). Ohne Key ist der MCP-Server für jeden im Netzwerk erreichbar – für Produktion empfohlen.
 - **Aktiv:** MCP-Server starten/beenden mit den Instanz-Änderungen.
 
 ## MCP-Tools

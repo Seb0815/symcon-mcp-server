@@ -167,6 +167,7 @@ Auf der SymBox in `/var/lib/symcon/user/symcon-mcp-server/libs/mcp-server/` die 
    - **Symcon API URL:**  
      `http://127.0.0.1:3777/api/`  
      (Symcon läuft auf derselben SymBox; 3777 = Standard-Webserver.)
+   - **API-Key (optional):** Wenn Sie den MCP-Server schützen wollen, tragen Sie einen geheimen Schlüssel ein (z. B. ein langes Zufallspasswort). Jeder Client (Cursor, Inspector, curl) muss dann denselben Key mitsenden (Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>`). Leer = keine Authentifizierung – dann kann jeder im Netzwerk den Port nutzen.
    - **Aktiv:** Haken setzen.
 
 5. **„Änderungen übernehmen“** klicken.
@@ -199,7 +200,10 @@ curl -X POST http://192.168.10.12:4096 \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 ```
 
-Erwartung: JSON-Antwort mit `result` (z. B. Server-Infos), kein „Connection refused“. Port und IP ggf. anpassen (z. B. 4096 → Ihr Port, 192.168.10.12 → Ihre SymBox-IP).
+**Falls Sie einen API-Key konfiguriert haben**, zusätzlich z. B.:  
+`-H "Authorization: Bearer IHR_API_KEY"` oder `-H "X-MCP-API-Key: IHR_API_KEY"`.
+
+Erwartung: JSON-Antwort mit `result` (z. B. Server-Infos), kein „Connection refused“. Ohne gültigen Key: HTTP 401 Unauthorized. Port und IP ggf. anpassen (z. B. 4096 → Ihr Port, 192.168.10.12 → Ihre SymBox-IP).
 
 ### 2. MCP Inspector (Tools im Browser testen)
 
@@ -213,7 +217,11 @@ Erwartung: JSON-Antwort mit `result` (z. B. Server-Infos), kein „Connection 
 
 1. Cursor: **Einstellungen** → **MCP** → **Server hinzufügen**.
 2. **Streamable HTTP**, URL: **http://192.168.10.12:4096** (SymBox-IP und Port anpassen).
-3. Speichern – Cursor verbindet sich mit dem Symcon-MCP-Server; in Chats z. B. „Lies Variable 12345“ (mit echten IDs aus Symcon).
+3. **Falls Sie einen API-Key in Symcon gesetzt haben:** Unter „Headers“ eintragen:  
+   - Name: `Authorization`, Wert: `Bearer IHR_API_KEY` (IHR_API_KEY durch den in Symcon konfigurierten Key ersetzen),  
+   - oder Name: `X-MCP-API-Key`, Wert: `IHR_API_KEY`.  
+   Ohne API-Key: Headers leer lassen.
+4. Speichern – Cursor verbindet sich mit dem Symcon-MCP-Server; in Chats z. B. „Lies Variable 12345“ (mit echten IDs aus Symcon).
 
 ### 4. Optional: Nur localhost (SSH-Tunnel)
 
@@ -240,8 +248,9 @@ MCP_PORT=4096 SYMCON_API_URL=http://127.0.0.1:3777/api/ npm run start
 | Bei Git-Installation: Repo enthält `dist/` – nichts zu tun. Bei manuell: Build + Kopieren von `dist/` | ☐ |
 | Node.js auf der SymBox verfügbar (oder geklärt, dass Modul sonst nicht starten kann) | ☐ |
 | In der Konsole: Instanz „MCP Server“ angelegt | ☐ |
-| Port (z. B. 4096), Symcon API URL `http://127.0.0.1:3777/api/`, „Aktiv“ gesetzt | ☐ |
+| Port (z. B. 4096), Symcon API URL `http://127.0.0.1:3777/api/`, optional API-Key, „Aktiv“ gesetzt | ☐ |
 | „Änderungen übernehmen“ geklickt | ☐ |
+| Bei API-Key: Cursor/Client mit Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>` konfiguriert | ☐ |
 
 ---
 
@@ -255,5 +264,8 @@ MCP_PORT=4096 SYMCON_API_URL=http://127.0.0.1:3777/api/ npm run start
 
 - **„Verbindung zu Port 4096 schlägt fehl“**  
   SymBox-IP und Port prüfen (z. B. `http://192.168.10.12:4096`). MCP-Server hört standardmäßig auf allen Schnittstellen (0.0.0.0). Firewall auf der SymBox prüfen, ob Port 4096 erlaubt ist.
+
+- **„401 Unauthorized“ / „Missing or invalid API key“**  
+  Sie haben in Symcon einen API-Key gesetzt. In Cursor (MCP-Einstellungen) unter Headers eintragen: `Authorization: Bearer IHR_KEY` oder `X-MCP-API-Key: IHR_KEY`. Key muss exakt dem in Symcon entsprechen.
 
 Bei weiteren Fragen: [Symcon-Dokumentation](https://www.symcon.de/de/service/dokumentation/), [Symcon-Forum](https://www.symcon.de/forum/), [SymBox-Installation](https://www.symcon.de/de/service/dokumentation/installation/symbox).

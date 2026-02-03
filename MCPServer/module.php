@@ -22,6 +22,7 @@ class MCPServer extends IPSModule
         parent::Create();
         $this->RegisterPropertyInteger('Port', self::DEFAULT_PORT);
         $this->RegisterPropertyString('SymconApiUrl', self::DEFAULT_API_URL);
+        $this->RegisterPropertyString('ApiKey', '');
         $this->RegisterPropertyBoolean('Active', true);
     }
 
@@ -38,13 +39,14 @@ class MCPServer extends IPSModule
 
         $port = (int) $this->ReadPropertyInteger('Port');
         $apiUrl = trim((string) $this->ReadPropertyString('SymconApiUrl'));
+        $apiKey = trim((string) $this->ReadPropertyString('ApiKey'));
         $active = (bool) $this->ReadPropertyBoolean('Active');
 
         if (!$active || $port < 1024 || $port > 65535 || $apiUrl === '') {
             return;
         }
 
-        $this->startProcess($port, $apiUrl);
+        $this->startProcess($port, $apiUrl, $apiKey);
     }
 
     public function GetConfigurationForm(): string
@@ -89,7 +91,7 @@ class MCPServer extends IPSModule
         @unlink($pidFile);
     }
 
-    private function startProcess(int $port, string $apiUrl): void
+    private function startProcess(int $port, string $apiUrl, string $apiKey = ''): void
     {
         $mcpPath = $this->getMcpServerPath();
         $nodePath = $mcpPath . '/dist/index.js';
@@ -105,6 +107,9 @@ class MCPServer extends IPSModule
             'MCP_PORT' => (string) $port,
             'SYMCON_API_URL' => $apiUrl,
         ];
+        if ($apiKey !== '') {
+            $env['MCP_AUTH_TOKEN'] = $apiKey;
+        }
         $pidFile = $this->getPidFilePath();
 
         $cmd = sprintf(
@@ -126,12 +131,13 @@ class MCPServer extends IPSModule
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
+        $procEnv = array_merge($_ENV ?? [], $env);
         $proc = @proc_open(
             $cmd,
             $spec,
             $pipes,
             $mcpPath,
-            array_merge($_ENV ?? [], $env)
+            $procEnv
         );
         if (!is_resource($proc)) {
             IPS_LogMessage('MCPServer', 'Failed to start MCP server process');
