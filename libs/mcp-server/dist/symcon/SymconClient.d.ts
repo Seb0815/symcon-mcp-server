@@ -12,11 +12,21 @@ export interface SymconRpcResponse<T = unknown> {
     };
     id: number | string | null;
 }
+export type SymconAuth = {
+    type: 'basic';
+    username: string;
+    password: string;
+} | {
+    type: 'header';
+    name: string;
+    value: string;
+};
 export declare class SymconClient {
     private readonly baseUrl;
     private readonly timeoutMs;
     private requestId;
-    constructor(baseUrl: string, timeoutMs?: number);
+    private readonly authHeader?;
+    constructor(baseUrl: string, timeoutMs?: number, auth?: SymconAuth);
     /**
      * Call a Symcon RPC method (Befehlsreferenz method names).
      */

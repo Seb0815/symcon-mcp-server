@@ -7,9 +7,19 @@ export class SymconClient {
     baseUrl;
     timeoutMs;
     requestId = 0;
-    constructor(baseUrl, timeoutMs = DEFAULT_TIMEOUT_MS) {
-        this.baseUrl = baseUrl.replace(/\/$/, '');
+    authHeader;
+    constructor(baseUrl, timeoutMs = DEFAULT_TIMEOUT_MS, auth) {
+        const trimmed = baseUrl.trim();
+        // IP-Symcon JSON-RPC Endpoint ist /api/ (mit Slash). /api (ohne Slash) liefert i. d. R. HTTP 404.
+        this.baseUrl = trimmed.endsWith('/api') ? `${trimmed}/` : trimmed;
         this.timeoutMs = timeoutMs;
+        if (auth?.type === 'basic') {
+            const token = Buffer.from(`${auth.username}:${auth.password}`, 'utf8').toString('base64');
+            this.authHeader = { name: 'Authorization', value: `Basic ${token}` };
+        }
+        else if (auth?.type === 'header') {
+            this.authHeader = { name: auth.name, value: auth.value };
+        }
     }
     /**
      * Call a Symcon RPC method (Befehlsreferenz method names).
@@ -27,7 +37,10 @@ export class SymconClient {
         try {
             const res = await fetch(this.baseUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(this.authHeader ? { [this.authHeader.name]: this.authHeader.value } : {}),
+                },
                 body: JSON.stringify(body),
                 signal: controller.signal,
             });

@@ -10,6 +10,9 @@ import { SymconClient } from './symcon/SymconClient.js';
 import { createToolHandlers } from './tools/index.js';
 const PORT = parseInt(process.env.MCP_PORT ?? '4096', 10);
 const SYMCON_API_URL = process.env.SYMCON_API_URL ?? 'http://127.0.0.1:3777/api/';
+/** Optional (für Remote-Zugriff auf http://<SymBox-IP>:3777/api/): Basic-Auth */
+const SYMCON_API_USER = process.env.SYMCON_API_USER ?? '';
+const SYMCON_API_PASSWORD = process.env.SYMCON_API_PASSWORD ?? '';
 /** Optional: if set, requests must send Authorization: Bearer <token> or X-MCP-API-Key: <token> */
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN ?? '';
 /** Bind on all interfaces (0.0.0.0) so the server is reachable at http://<SymBox-IP>:PORT from your Mac/PC. */
@@ -55,7 +58,10 @@ function readBody(req) {
     });
 }
 async function main() {
-    const client = new SymconClient(SYMCON_API_URL);
+    const symconAuth = SYMCON_API_USER && SYMCON_API_PASSWORD
+        ? { type: 'basic', username: SYMCON_API_USER, password: SYMCON_API_PASSWORD }
+        : undefined;
+    const client = new SymconClient(SYMCON_API_URL, 10000, symconAuth);
     const mcp = new McpServer({
         name: 'symcon-mcp-server',
         version: '1.0.0',

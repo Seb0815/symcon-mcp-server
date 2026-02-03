@@ -12,14 +12,27 @@ export interface SymconRpcResponse<T = unknown> {
   id: number | string | null;
 }
 
+export type SymconAuth =
+  | { type: 'basic'; username: string; password: string }
+  | { type: 'header'; name: string; value: string };
+
 export class SymconClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private requestId = 0;
+  private readonly authHeader?: { name: string; value: string };
 
-  constructor(baseUrl: string, timeoutMs: number = DEFAULT_TIMEOUT_MS) {
-    this.baseUrl = baseUrl.replace(/\/$/, '');
+  constructor(baseUrl: string, timeoutMs: number = DEFAULT_TIMEOUT_MS, auth?: SymconAuth) {
+    const trimmed = baseUrl.trim();
+    // IP-Symcon JSON-RPC Endpoint ist /api/ (mit Slash). /api (ohne Slash) liefert i. d. R. HTTP 404.
+    this.baseUrl = trimmed.endsWith('/api') ? `${trimmed}/` : trimmed;
     this.timeoutMs = timeoutMs;
+    if (auth?.type === 'basic') {
+      const token = Buffer.from(`${auth.username}:${auth.password}`, 'utf8').toString('base64');
+      this.authHeader = { name: 'Authorization', value: `Basic ${token}` };
+    } else if (auth?.type === 'header') {
+      this.authHeader = { name: auth.name, value: auth.value };
+    }
   }
 
   /**
@@ -38,7 +51,10 @@ export class SymconClient {
     try {
       const res = await fetch(this.baseUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.authHeader ? { [this.authHeader.name]: this.authHeader.value } : {}),
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
