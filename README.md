@@ -1,0 +1,1 @@
+# symcon-mcp-server
