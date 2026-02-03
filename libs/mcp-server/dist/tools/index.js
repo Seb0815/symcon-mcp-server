@@ -5,6 +5,8 @@
 import { z } from 'zod';
 const variableIdSchema = z.object({ variableId: z.number().int().positive() });
 const objectIdSchema = z.object({ objectId: z.number().int().positive() });
+/** Erlaubt 0 für Root, damit man den Objektbaum ab Root durchlaufen kann (z. B. für Sprachsteuerung). */
+const parentIdSchema = z.object({ objectId: z.number().int().min(0) });
 const scriptIdSchema = z.object({ scriptId: z.number().int().positive() });
 const setValueSchema = z.object({
     variableId: z.number().int().positive(),
@@ -52,8 +54,8 @@ export function createToolHandlers(client) {
             },
         },
         symcon_get_children: {
-            description: 'Liefert die Kinder-IDs eines Objekts (IPS_GetChildrenIDs).',
-            inputSchema: objectIdSchema,
+            description: 'Liefert die Kinder-IDs eines Objekts (IPS_GetChildrenIDs). objectId 0 = Root, damit man den Baum für Sprachsteuerung durchlaufen kann.',
+            inputSchema: parentIdSchema,
             handler: async (args) => {
                 const { objectId } = getArgs(args);
                 const ids = await client.getChildrenIds(objectId);
@@ -85,6 +87,100 @@ export function createToolHandlers(client) {
                 const { variableId } = getArgs(args);
                 const v = await client.getVariable(variableId);
                 return { content: [{ type: 'text', text: JSON.stringify(v, null, 2) }] };
+            },
+        },
+        symcon_control_device: {
+            description: 'Steuert ein Gerät per Ort und Name (Sprachsteuerung). Sucht unter Root nach dem Ort (z. B. "Büro"), dann nach dem Gerät (z. B. "Licht"), setzt die Variable auf ein/aus. Aktion: "ein", "an", "on" = an; "aus", "off" = aus.',
+            inputSchema: z.object({
+                location: z.string().describe('Ort/Raum, z. B. "Büro", "Wohnzimmer"'),
+                deviceName: z.string().describe('Gerät, z. B. "Licht", "Deckenlicht"'),
+                action: z.enum(['ein', 'an', 'on', 'aus', 'off']).describe('Aktion: ein/an/on = an, aus/off = aus'),
+            }),
+            handler: async (args) => {
+                const { location, deviceName, action } = getArgs(args);
+                const value = action === 'aus' || action === 'off' ? false : true;
+                const locNorm = location.trim().toLowerCase();
+                const devNorm = deviceName.trim().toLowerCase();
+                let locationId;
+                try {
+                    locationId = await client.getObjectIdByName(location.trim(), 0);
+                }
+                catch {
+                    const rootIds = await client.getChildrenIds(0);
+                    let found = false;
+                    locationId = 0;
+                    for (const id of rootIds) {
+                        const obj = (await client.getObject(id));
+                        const name = String(obj?.Name ?? '').trim().toLowerCase();
+                        if (name === locNorm || name.includes(locNorm) || locNorm.includes(name)) {
+                            locationId = id;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: JSON.stringify({
+                                        ok: false,
+                                        error: `Ort "${location}" nicht gefunden. Root-Kinder: ${rootIds.join(', ')}`,
+                                    }),
+                                },
+                            ],
+                        };
+                    }
+                }
+                const childIds = await client.getChildrenIds(locationId);
+                let variableId = null;
+                for (const id of childIds) {
+                    const obj = (await client.getObject(id));
+                    const name = String(obj?.Name ?? '').trim().toLowerCase();
+                    const type = Number(obj?.ObjectType ?? -1);
+                    const nameMatch = name === devNorm || name.includes(devNorm) || devNorm.includes(name);
+                    if (nameMatch && type === 2) {
+                        variableId = id;
+                        break;
+                    }
+                    if (nameMatch && type === 0) {
+                        const subIds = await client.getChildrenIds(id);
+                        for (const subId of subIds) {
+                            const sub = (await client.getObject(subId));
+                            if (Number(sub?.ObjectType ?? -1) === 2) {
+                                variableId = subId;
+                                break;
+                            }
+                        }
+                        if (variableId !== null)
+                            break;
+                    }
+                }
+                if (variableId === null) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    ok: false,
+                                    error: `Gerät "${deviceName}" in "${location}" nicht gefunden. Kinder: ${childIds.join(', ')}`,
+                                }),
+                            },
+                        ],
+                    };
+                }
+                await client.setValue(variableId, value);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                ok: true,
+                                message: `${deviceName} in ${location} ${value ? 'ein' : 'aus'}geschaltet (VariableID ${variableId}).`,
+                            }),
+                        },
+                    ],
+                };
             },
         },
     };
