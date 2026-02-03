@@ -185,6 +185,6 @@ Symcon startet dann im Hintergrund den Node-Prozess (MCP-Server). Wenn Node.js n
   Node.js auf dem Server installiert? In `libs/mcp-server` `npm run build` ausgeführt (oder `dist/` von Ihrem Rechner kopiert)?
 
 - **„Verbindung zu Port 4096 schlägt fehl“**  
-  MCP-Server hört standardmäßig nur auf 127.0.0.1. Für Zugriff von Cursor/PC aus dem Netzwerk wäre eine Anpassung (Binding auf 0.0.0.0 oder Reverse-Proxy) nötig.
+  MCP-Server hört standardmäßig nur auf 127.0.0.1. Für Zugriff von einem anderen Rechner aus dem Netzwerk wäre eine Anpassung (Binding auf 0.0.0.0 oder Reverse-Proxy) nötig.
 
 Bei weiteren Fragen hilft die [Symcon-Dokumentation](https://www.symcon.de/de/service/dokumentation/) und das [Symcon-Forum](https://www.symcon.de/forum/).

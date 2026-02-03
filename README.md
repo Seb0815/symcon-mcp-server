@@ -1,6 +1,6 @@
 # Symcon MCP Server – Bibliothek
 
-Symcon-Bibliothek mit dem Modul **MCP Server**: Ein PHP-Wrapper startet einen Node.js MCP-Server, der die IP-Symcon JSON-RPC API als MCP-Tools (GetValue, SetValue, RequestAction, Objekte, Skripte) bereitstellt. So können KI-Clients (z. B. Cursor oder ein späterer „smarte Helfer“) per Streamable HTTP auf Ihr Symcon-Smart-Home zugreifen.
+Symcon-Bibliothek mit dem Modul **MCP Server**: Ein PHP-Wrapper startet einen Node.js MCP-Server, der die IP-Symcon JSON-RPC API als MCP-Tools (GetValue, SetValue, RequestAction, Objekte, Skripte) bereitstellt. So können KI-Clients (z. B. ein KI-fähiger Editor oder ein späterer „smarte Helfer“) per Streamable HTTP auf Ihr Symcon-Smart-Home zugreifen.
 
 ## Voraussetzungen
 
@@ -32,4 +32,4 @@ Symcon-Bibliothek mit dem Modul **MCP Server**: Ein PHP-Wrapper startet einen No
 - `symcon_get_object_id_by_name` – Objekt-ID anhand des Namens (name, optional parentId)
 - `symcon_get_variable` – Variablen-Infos (variableId)
 
-Ein MCP-Client (z. B. Cursor oder ein eigener KI-Assistent) verbindet sich per Streamable HTTP mit `http://127.0.0.1:<Port>` (POST/GET am gleichen Endpunkt). Der spätere „smarte Helfer“ wird in einem separaten Schritt entwickelt und nutzt diesen MCP-Server.
+Ein MCP-Client (z. B. ein KI-fähiger Editor oder ein eigener KI-Assistent) verbindet sich per Streamable HTTP mit `http://127.0.0.1:<Port>` (POST/GET am gleichen Endpunkt). Der spätere „smarte Helfer“ wird in einem separaten Schritt entwickelt und nutzt diesen MCP-Server.
