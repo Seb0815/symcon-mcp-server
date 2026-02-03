@@ -106,15 +106,23 @@ class MCPServer extends IPSModule
         if ($pid <= 0) {
             return ['running' => false, 'pid' => ''];
         }
-        $running = false;
-        if (function_exists('posix_kill')) {
-            $running = @posix_kill($pid, 0);
-        } else {
-            if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-                $running = trim((string) @shell_exec('tasklist /FI "PID eq ' . $pid . '" 2>nul')) !== '';
-            }
-        }
+        $running = $this->isProcessRunning($pid);
         return ['running' => $running, 'pid' => (string) $pid];
+    }
+
+    /** Prüft, ob ein Prozess mit der angegebenen PID läuft. Unter Linux: /proc/<pid>, sonst posix_kill/tasklist. */
+    private function isProcessRunning(int $pid): bool
+    {
+        if (PHP_OS_FAMILY === 'Linux') {
+            return is_dir('/proc/' . $pid);
+        }
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            return trim((string) @shell_exec('tasklist /FI "PID eq ' . $pid . '" 2>nul')) !== '';
+        }
+        return false;
     }
 
     private function getMcpServerPath(): string
