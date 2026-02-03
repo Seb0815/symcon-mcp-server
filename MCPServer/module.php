@@ -61,11 +61,11 @@ class MCPServer extends IPSModule
 
         if (!$active || $port < 1024 || $port > 65535 || $apiUrl === '') {
             if (!$active) {
-                $this->sendDebug('MCP-Server deaktiviert („Aktiv“ aus). Nicht gestartet.');
+                $this->logMessage('MCP-Server deaktiviert („Aktiv“ aus). Nicht gestartet.');
             } elseif ($port < 1024 || $port > 65535) {
-                $this->sendDebug('Ungültiger Port ' . $port . '. MCP-Server nicht gestartet.');
+                $this->logMessage('Ungültiger Port ' . $port . '. MCP-Server nicht gestartet.');
             } else {
-                $this->sendDebug('Symcon-API-URL fehlt. MCP-Server nicht gestartet.');
+                $this->logMessage('Symcon-API-URL fehlt. MCP-Server nicht gestartet.');
             }
             return;
         }
@@ -138,7 +138,7 @@ class MCPServer extends IPSModule
             @unlink($pidFile);
             return;
         }
-        $this->sendDebug('MCP-Server wird beendet (PID ' . $pid . ').');
+        $this->logMessage('MCP-Server wird beendet (PID ' . $pid . ').');
         if (function_exists('posix_kill')) {
             @posix_kill($pid, (defined('SIGTERM') ? SIGTERM : 15));
         } else {
@@ -149,7 +149,7 @@ class MCPServer extends IPSModule
             }
         }
         @unlink($pidFile);
-        $this->sendDebug('MCP-Server gestoppt.');
+        $this->logMessage('MCP-Server gestoppt.');
     }
 
     private function startProcess(int $port, string $apiUrl, string $apiKey = ''): void
@@ -160,7 +160,7 @@ class MCPServer extends IPSModule
             $nodePath = $mcpPath . '/index.js';
         }
         if (!is_file($nodePath)) {
-            $this->sendDebug('FEHLER: Node-Einstieg nicht gefunden: ' . $nodePath);
+            $this->logMessage('FEHLER: Node-Einstieg nicht gefunden: ' . $nodePath);
             return;
         }
 
@@ -201,7 +201,7 @@ class MCPServer extends IPSModule
             $procEnv
         );
         if (!is_resource($proc)) {
-            $this->sendDebug('FEHLER: MCP-Server-Prozess konnte nicht gestartet werden.');
+            $this->logMessage('FEHLER: MCP-Server-Prozess konnte nicht gestartet werden.');
             return;
         }
         fclose($pipes[0]);
@@ -213,14 +213,14 @@ class MCPServer extends IPSModule
         $pid = (int) trim((string) $stdout);
         if ($pid > 0) {
             file_put_contents($pidFile, (string) $pid);
-            $this->sendDebug(sprintf('MCP-Server gestartet: Port %d, PID %d, Symcon-API %s, Auth %s', $port, $pid, $apiUrl, $apiKey !== '' ? 'aktiv' : 'aus'));
+            $this->logMessage(sprintf('MCP-Server gestartet: Port %d, PID %d, Symcon-API %s, Auth %s', $port, $pid, $apiUrl, $apiKey !== '' ? 'aktiv' : 'aus'));
         } else {
-            $this->sendDebug('FEHLER: Keine PID nach Start erhalten.');
+            $this->logMessage('FEHLER: Keine PID nach Start erhalten.');
         }
     }
 
-    /** Schreibt ins Debug-Protokoll der Instanz (und ins allgemeine Log). Sichtbarkeit protected wie in IPSModule. */
-    protected function sendDebug(string $message): void
+    /** Schreibt ins Log (Absender = Instanz-ID, erscheint im Debug-Protokoll der Instanz). */
+    private function logMessage(string $message): void
     {
         IPS_LogMessage((string) $this->InstanceID, $message);
     }
