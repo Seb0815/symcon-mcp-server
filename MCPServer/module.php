@@ -85,9 +85,12 @@ class MCPServer extends IPSModule
         }
         $port = (int) $this->ReadPropertyInteger('Port');
         $status = $this->getProcessStatus();
-        $statusCaption = $status['running']
-            ? sprintf('[OK] MCP-Server läuft auf Port %d (PID: %s). MCP-Client (z. B. Claude): http://<SymBox-IP>:%d', $port, $status['pid'], $port)
-            : '[--] MCP-Server gestoppt. Aktiv setzen und Änderungen übernehmen klicken.';
+        if ($status['running']) {
+            $pidInfo = $status['pid'] !== '' ? ' (PID: ' . $status['pid'] . ')' : ' (Port in Benutzung)';
+            $statusCaption = '[OK] MCP-Server läuft auf Port ' . $port . $pidInfo . '. MCP-Client (z. B. Claude): http://<SymBox-IP>:' . $port;
+        } else {
+            $statusCaption = '[--] MCP-Server gestoppt. Aktiv setzen und Änderungen übernehmen klicken.';
+        }
         array_unshift($form['elements'], [
             'type'    => 'Label',
             'caption' => $statusCaption,
@@ -95,19 +98,23 @@ class MCPServer extends IPSModule
         return json_encode($form);
     }
 
-    /** Liefert ['running' => bool, 'pid' => string] für die Status-Anzeige. */
+    /** Liefert ['running' => bool, 'pid' => string] für die Status-Anzeige. Fallback: Port-Check, wenn PID-Check fehlschlägt. */
     private function getProcessStatus(): array
     {
+        $port = (int) $this->ReadPropertyInteger('Port');
         $pidFile = $this->getPidFilePath();
-        if (!is_file($pidFile)) {
-            return ['running' => false, 'pid' => ''];
+        $pid = 0;
+        if (is_file($pidFile)) {
+            $pid = (int) trim((string) file_get_contents($pidFile));
         }
-        $pid = (int) trim((string) file_get_contents($pidFile));
-        if ($pid <= 0) {
-            return ['running' => false, 'pid' => ''];
+        $running = $pid > 0 && $this->isProcessRunning($pid);
+        if (!$running && $port >= 1024 && $this->isPortListening($port)) {
+            $running = true;
+            if ($pid <= 0) {
+                $pid = 0;
+            }
         }
-        $running = $this->isProcessRunning($pid);
-        return ['running' => $running, 'pid' => (string) $pid];
+        return ['running' => $running, 'pid' => $pid > 0 ? (string) $pid : ''];
     }
 
     /** Prüft, ob ein Prozess mit der angegebenen PID läuft. Unter Linux: /proc/<pid>, sonst posix_kill/tasklist. */
@@ -121,6 +128,25 @@ class MCPServer extends IPSModule
         }
         if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
             return trim((string) @shell_exec('tasklist /FI "PID eq ' . $pid . '" 2>nul')) !== '';
+        }
+        return false;
+    }
+
+    /** Prüft, ob auf dem Port etwas lauscht (Fallback für Status-Anzeige, wenn PID-Check unzuverlässig). */
+    private function isPortListening(int $port): bool
+    {
+        $errno = 0;
+        $errstr = '';
+        $fp = @stream_socket_client(
+            'tcp://127.0.0.1:' . $port,
+            $errno,
+            $errstr,
+            1,
+            STREAM_CLIENT_CONNECT
+        );
+        if (is_resource($fp)) {
+            fclose($fp);
+            return true;
         }
         return false;
     }
@@ -227,9 +253,10 @@ class MCPServer extends IPSModule
         }
     }
 
-    /** Schreibt ins Log (Absender = Instanz-ID). Eigenname, um IPSModule-Methoden nicht zu überschreiben. */
+    /** Schreibt ins Instanz-Debug-Protokoll (sendDebug der Elternklasse) und ins allgemeine Log. */
     private function mcpLog(string $message): void
     {
-        IPS_LogMessage((string) $this->InstanceID, $message);
+        $this->sendDebug($message, '');
+        IPS_LogMessage('MCPServer', $message);
     }
 }

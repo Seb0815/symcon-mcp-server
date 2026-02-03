@@ -183,7 +183,7 @@ Symcon startet dann den Node-Prozess (MCP-Server). **Wichtig:** Auf der SymBox m
 - **MCP-Server hört auf allen Schnittstellen (0.0.0.0).**  
   Von Ihrem Mac/PC aus direkt erreichbar unter **http://&lt;IP-der-SymBox&gt;:4096** (z. B. `http://192.168.10.12:4096`). Kein SSH-Tunnel nötig.
 
-- **Debug-Protokoll:** In Symcon bei der Instanz **„MCP Server“** den Tab **„Debug: MCP SERVER“** (bzw. „Debug Protokoll“) öffnen und **„START“** klicken. Beim Start/Stopp des MCP-Servers schreibt das Modul dorthin Meldungen (z. B. „MCP-Server gestartet: Port …, PID …, Auth aktiv/aus“, „MCP-Server gestoppt“). Auch Fehler (z. B. Node nicht gefunden) erscheinen dort. Alternativ: **„Log“** / **„Nachrichten“** und nach der Instanz-ID als Absender filtern.
+- **Debug-Protokoll:** Bei der Instanz **„MCP Server“** den Tab **„Debug Protokoll“** öffnen und oben **„START“** klicken (damit Meldungen aufgezeichnet werden). Dann **„Änderungen übernehmen“** klicken – es erscheinen Meldungen wie „MCP-Server gestartet …“ oder „MCP-Server gestoppt“. Ohne START bleiben die Einträge leer. Zusätzlich: **„Meldungen“** / **„Nachrichten“** – dort erscheinen alle Log-Einträge mit Absender „MCPServer“.
 
 ---
 
@@ -271,6 +271,6 @@ MCP_PORT=4096 SYMCON_API_URL=http://127.0.0.1:3777/api/ npm run start
   Sie haben in Symcon einen API-Key gesetzt. In Claude oder anderem MCP-Client (MCP-Einstellungen) unter Headers eintragen: `Authorization: Bearer IHR_KEY` oder `X-MCP-API-Key: IHR_KEY`. Key muss exakt dem in Symcon entsprechen.
 
 - **„Loading Tools“ bleibt hängen**  
-  (1) Erreichbarkeit prüfen: `curl -s -o /dev/null -w "%{http_code}" http://<SymBox-IP>:4096` – sollte z. B. 200 oder 405 liefern, nicht 000. (2) Symcon: Instanz „MCP Server“ → **Aktiv** gesetzt, **Änderungen übernehmen**. (3) Modul auf neueste Version (Auth nur für POST, GET/SSE ohne Key) – dann MCP-Client (z. B. Claude) neu starten.
+  (1) Symcon: Instanz „MCP Server“ → **Aktiv** gesetzt, **Änderungen übernehmen** – oben sollte dann **[OK] MCP-Server läuft** stehen (oder „Port in Benutzung“). (2) Erreichbarkeit vom Rechner des MCP-Clients: `curl -s -o /dev/null -w "%{http_code}" http://<SymBox-IP>:4096` – sollte 200 oder 405 liefern, nicht 000 (Firewall/Netzwerk prüfen). (3) API-Key im MCP-Client (Header `Authorization: Bearer <Key>`) muss exakt dem in Symcon entsprechen. (4) MCP-Client neu starten.
 
 Bei weiteren Fragen: [Symcon-Dokumentation](https://www.symcon.de/de/service/dokumentation/), [Symcon-Forum](https://www.symcon.de/forum/), [SymBox-Installation](https://www.symcon.de/de/service/dokumentation/installation/symbox).
