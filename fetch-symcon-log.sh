@@ -13,17 +13,35 @@ set -e
 HOST="${1:-root@192.168.10.12}"
 LINES="${2:-100}"
 
-# Symcon-Datenverzeichnis: SymBox oft /var/lib/symcon oder /mnt/data/symcon
-# $dir und $LOG auf der Remote-Shell auswerten, $LINES lokal einsetzen
-ssh "$HOST" "for dir in /var/lib/symcon /mnt/data/symcon; do
-  if [ -d \"\$dir/logs\" ]; then
-    LOG=\$(ls -t \"\$dir/logs\"/log_*.txt \"\$dir/logs\"/log.txt 2>/dev/null | head -1)
-    if [ -n \"\$LOG\" ]; then
+# Symcon-Datenverzeichnis: SymBox/SymOS variiert (var/lib, mnt/data, opt, …)
+# Suche: 1) logs/ mit log_*.txt oder log.txt, 2) find nach log-Dateien unter symcon
+ssh "$HOST" "
+  for base in /var/lib/symcon /mnt/data/symcon /opt/symcon /usr/share/symcon; do
+    for logdir in \"\$base/logs\" \"\$base\"; do
+      if [ -d \"\$logdir\" ]; then
+        LOG=\$(ls -t \"\$logdir\"/log_*.txt \"\$logdir\"/log_* \"\$logdir\"/log.txt \"\$logdir\"/log 2>/dev/null | head -1)
+        if [ -n \"\$LOG\" ] && [ -f \"\$LOG\" ]; then
+          echo \"=== \$LOG (letzte $LINES Zeilen) ===\" >&2
+          tail -n $LINES \"\$LOG\"
+          exit 0
+        fi
+      fi
+    done
+  done
+  # Fallback: find unter /mnt/data und /var/lib nach symcon/logs
+  for base in /var/lib /mnt/data /opt; do
+    [ ! -d \"\$base\" ] && continue
+    LOG=\$(find \"\$base\" -path '*/symcon/logs/log_*' -type f 2>/dev/null | head -1)
+    [ -z \"\$LOG\" ] && LOG=\$(find \"\$base\" -path '*/symcon/logs/*.txt' -type f 2>/dev/null | head -1)
+    if [ -n \"\$LOG\" ] && [ -f \"\$LOG\" ]; then
       echo \"=== \$LOG (letzte $LINES Zeilen) ===\" >&2
       tail -n $LINES \"\$LOG\"
       exit 0
     fi
-  fi
-done
-echo 'Kein Symcon-Log unter /var/lib/symcon/logs oder /mnt/data/symcon/logs gefunden.' >&2
-exit 1"
+  done
+  echo 'Kein Symcon-Log gefunden. Struktur prüfen:' >&2
+  for d in /var/lib/symcon /mnt/data/symcon; do
+    [ -d \"\$d\" ] && echo \"  \$d:\" >&2 && ls -la \"\$d\" 2>/dev/null | head -5 >&2
+  done
+  exit 1
+"

@@ -295,7 +295,10 @@ Das Skript sucht das Symcon-Log unter `/var/lib/symcon/logs/` und `/mnt/data/sym
 **Ohne Skript (manuell per SSH):**
 
 ```bash
+# Log-Pfad kann je nach SymBox/SymOS variieren:
 ssh root@192.168.10.12 "tail -100 /var/lib/symcon/logs/log_*.txt 2>/dev/null || tail -100 /mnt/data/symcon/logs/log_*.txt"
+# Struktur anzeigen, wenn kein Log gefunden wird:
+ssh root@192.168.10.12 "ls -la /var/lib/symcon/ /mnt/data/symcon/ 2>/dev/null"
 ```
 
 Bei weiteren Fragen: [Symcon-Dokumentation](https://www.symcon.de/de/service/dokumentation/), [Symcon-Forum](https://www.symcon.de/forum/), [SymBox-Installation](https://www.symcon.de/de/service/dokumentation/installation/symbox).
