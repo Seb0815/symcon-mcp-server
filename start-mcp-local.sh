@@ -34,6 +34,32 @@ if [ -n "$SYMCON_USER" ] && [ -z "$SYMCON_PASS" ]; then
   export SYMCON_API_PASSWORD="$SYMCON_PASS"
 fi
 
+# Passwort prüfen: Symcon-API mit Basic-Auth testen
+if [ -n "$SYMCON_USER" ] && [ -n "$SYMCON_PASS" ]; then
+  echo "Prüfe Symcon-Anmeldung..."
+  RESP=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
+    -u "$SYMCON_USER:$SYMCON_PASS" \
+    -d '{"jsonrpc":"2.0","method":"IPS_GetKernelVersion","params":[],"id":1}' \
+    "$SYMCON_URL")
+  HTTP_CODE=$(echo "$RESP" | tail -n1)
+  BODY=$(echo "$RESP" | sed '$d')
+  if [ "$HTTP_CODE" = "401" ]; then
+    echo "Fehler: Anmeldung fehlgeschlagen (401). Passwort oder Benutzer falsch."
+    exit 1
+  fi
+  if [ "$HTTP_CODE" != "200" ]; then
+    echo "Fehler: Symcon-API antwortete mit HTTP $HTTP_CODE"
+    exit 1
+  fi
+  if echo "$BODY" | grep -q '"error"'; then
+    echo "Fehler: Symcon-API meldet Fehler. Prüfe Passwort und URL."
+    echo "$BODY" | head -c 200
+    echo ""
+    exit 1
+  fi
+  echo "Symcon-Anmeldung OK."
+fi
+
 echo "Starte MCP-Server lokal (Port 4096), Symcon-API: $SYMCON_URL"
 echo "In Cursor MCP-URL auf http://127.0.0.1:4096 stellen, dann Cursor neu starten."
 if [ -n "$SYMCON_USER" ]; then
