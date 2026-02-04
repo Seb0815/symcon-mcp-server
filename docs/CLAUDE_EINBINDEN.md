@@ -10,7 +10,7 @@ In Claude Desktop siehst du unter **Einstellungen → Erweiterungen** oft: **„
 
 - **.mcpb / .dxt** = vorgepackte Erweiterungen (ein Klick, alles drin). Unser Symcon-Server ist ein **Streamable-HTTP-Server unter einer URL** – dafür gibt es jetzt **eine .mcpb-Datei zum Reinziehen**.
 
-**Drei Wege, den Symcon-Server in Claude zu nutzen:**
+**Zwei nutzbare Wege:** .mcpb-Datei reinziehen (empfohlen) oder Config-Datei. Der Dialog **„Benutzerdefinierten Connector hinzufügen“** (URL) **funktioniert nicht**, weil Claude dort nur **HTTPS** akzeptiert – der Symcon-Server läuft unter HTTP.
 
 ---
 
@@ -90,15 +90,11 @@ Der Adapter (`@pyroprompts/mcp-stdio-to-streamable-http-adapter`) läuft lokal u
 
 ---
 
-### Variante B: In Claude eine „URL“ oder „Connector“-Option
+### Variante B: „Benutzerdefinierten Connector hinzufügen“ (URL) – **funktioniert nicht mit Symcon**
 
-Falls in deiner Claude-Version unter **Einstellungen** ein Bereich **„Connectors“**, **„MCP“** oder **„Server hinzufügen“** existiert und dort eine **URL** (Streamable HTTP) eingegeben werden kann:
+Unter **Einstellungen → Konnektoren** gibt es oft **„Benutzerdefinierten Connector hinzufügen“**, wo man eine **Server-URL** eintragen kann. **Claude verlangt dort zwingend HTTPS** (Fehlermeldung: „URL muss mit 'https' beginnen“). Der Symcon MCP-Server läuft aber unter **HTTP** (z. B. `http://127.0.0.1:4096`). Daher ist dieser Weg **für Symcon nicht nutzbar**.
 
-1. Symcon-Server starten (siehe oben).
-2. In Claude die Symcon-URL eintragen: **http://127.0.0.1:4096** (oder SymBox-IP:4096).
-3. Optional: Header `Authorization: Bearer DEIN_API_KEY` setzen, falls du einen MCP-API-Key nutzt.
-
-Wenn es bei dir **nur** „.mcpb ziehen“ gibt, **Variante A** (Config-Datei) verwenden.
+**Empfehlung:** Symcon ausschließlich über **Variante 0 (.mcpb)** oder **Variante A (Config-Datei)** einbinden – dort wird die HTTP-URL nur intern vom Adapter genutzt, Claude prüft sie nicht auf HTTPS.
 
 ---
 
