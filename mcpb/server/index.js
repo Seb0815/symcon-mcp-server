@@ -7,6 +7,7 @@
  */
 
 const { spawn } = require('child_process');
+const http = require('http');
 
 const adapter = '@pyroprompts/mcp-stdio-to-streamable-http-adapter';
 const uri = (process.env.URI || 'http://127.0.0.1:4096').trim();
@@ -20,20 +21,65 @@ if (bearerToken) {
   delete env.BEARER_TOKEN;
 }
 
-// Hinweis für Log: Welche URL genutzt wird (hilft bei "Server disconnected")
-console.error('[Symcon MCPB] Connecting to Symcon MCP server at ' + uri + ' …');
+/** Prüft, ob unter URI ein Server antwortet (z. B. Symcon MCP). Bei ECONNREFUSED → false. */
+function checkReachable(url, timeoutMs) {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'https:') {
+        resolve(false);
+        return;
+      }
+      const req = http.request(
+        {
+          hostname: u.hostname,
+          port: u.port || 80,
+          path: u.pathname || '/',
+          method: 'GET',
+        },
+        (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve(true));
+        }
+      );
+      req.setTimeout(timeoutMs, () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on('error', () => resolve(false));
+      req.end();
+    } catch {
+      resolve(false);
+    }
+  });
+}
 
-const child = spawn('npx', ['-y', adapter], { stdio: 'inherit', env, shell: true });
-child.on('close', (code, signal) => {
-  if (code !== 0 && code != null) {
+async function main() {
+  console.error('[Symcon MCPB] Connecting to Symcon MCP server at ' + uri + ' …');
+
+  const reachable = await checkReachable(uri, 3000);
+  if (!reachable) {
     console.error(
-      '[Symcon MCPB] Adapter exited with code ' + code + '. ' +
-      'Ensure the Symcon MCP server is running at ' + uri + ' (e.g. ./start-mcp-local.sh).'
+      '[Symcon MCPB] Symcon MCP server is not reachable at ' + uri + '. ' +
+      'Start it first (e.g. ./start-mcp-local.sh in symcon-mcp-server).'
     );
+    process.exit(1);
   }
-  process.exit(code == null ? (signal ? 1 : 0) : code);
-});
-child.on('error', (err) => {
-  console.error('[Symcon MCPB] Launcher error:', err.message);
-  process.exit(1);
-});
+
+  const child = spawn('npx', ['-y', adapter], { stdio: 'inherit', env, shell: true });
+  child.on('close', (code, signal) => {
+    if (code !== 0 && code != null) {
+      console.error(
+        '[Symcon MCPB] Adapter exited with code ' + code + '. ' +
+        'Ensure the Symcon MCP server is running at ' + uri + ' (e.g. ./start-mcp-local.sh).'
+      );
+    }
+    process.exit(code == null ? (signal ? 1 : 0) : code);
+  });
+  child.on('error', (err) => {
+    console.error('[Symcon MCPB] Launcher error:', err.message);
+    process.exit(1);
+  });
+}
+
+main();
