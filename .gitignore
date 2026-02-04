@@ -19,11 +19,16 @@ local-config.env
 # Ausnahme: vorgebauter MCP-Server für Git-Installation (SymBox hat oft kein Node)
 !libs/mcp-server/dist/
 !libs/mcp-server/dist/**
+# Wissensbasis (gelernte Geräte-Zuordnungen) – pro Nutzer/Instanz, nicht committen
+libs/mcp-server/data/
 **/.cache/
 
 # IDEs
 .idea/
 .vscode/
+
+# MCPB-Build (optional committen für Distribution)
+mcpb/*.mcpb
 
 # OS / tooling
 *.swp

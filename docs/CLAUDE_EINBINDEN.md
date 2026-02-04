@@ -8,15 +8,42 @@ So nutzt du dein Symcon-Smart-Home **mit Claude** (Anthropic): MCP-Server verbin
 
 In Claude Desktop siehst du unter **Einstellungen → Erweiterungen** oft: **„Ziehe .MCPB- oder .DXT-Dateien hier her, um sie zu installieren.“**
 
-- **.mcpb / .dxt** = vorgepackte Erweiterungen (ein Klick, alles drin). Unser Symcon-Server ist aber ein **Streamable-HTTP-Server unter einer URL** (z. B. http://127.0.0.1:4096), **keine** .mcpb-Datei.
+- **.mcpb / .dxt** = vorgepackte Erweiterungen (ein Klick, alles drin). Unser Symcon-Server ist ein **Streamable-HTTP-Server unter einer URL** – dafür gibt es jetzt **eine .mcpb-Datei zum Reinziehen**.
 
-**Zwei Wege, den Symcon-Server trotzdem in Claude zu nutzen:**
+**Drei Wege, den Symcon-Server in Claude zu nutzen:**
 
 ---
 
 ## 1. MCP-Server in Claude verbinden
 
-### Variante A: Config-Datei (empfohlen, wenn nur „.mcpb ziehen“ sichtbar ist)
+### Variante 0: .mcpb-Datei reinziehen (empfohlen)
+
+Es gibt eine **Symcon-Smart-Home-.mcpb**-Datei, die du in Claude Desktop **reinziehen** kannst (Einstellungen → Erweiterungen → „.mcpb hierher ziehen“ oder Doppelklick auf die Datei).
+
+1. **.mcpb-Datei erstellen** (einmalig, z. B. als Entwickler):
+   ```bash
+   cd symcon-mcp-server/mcpb
+   npm install -g @anthropic-ai/mcpb   # falls noch nicht installiert
+   mcpb pack
+   ```
+   Es entsteht `mcpb.mcpb` im Ordner `mcpb/` (optional umbenennen z. B. zu `symcon-smart-home-1.0.0.mcpb`).
+
+2. **Symcon MCP-Server starten** (muss laufen, bevor Claude sich verbindet):
+   ```bash
+   cd symcon-mcp-server
+   ./start-mcp-local.sh
+   ```
+   Server läuft z. B. auf **http://127.0.0.1:4096**.
+
+3. **.mcpb in Claude installieren**: Datei in Claude Desktop reinziehen. Beim Installieren wirst du nach der **Symcon MCP-Server URL** gefragt (Standard: `http://127.0.0.1:4096`). Optional: Bearer Token, falls dein MCP-Server einen API-Key verlangt.
+
+4. **Claude Desktop neu starten**. Danach ist die Symcon-Erweiterung aktiv – vorausgesetzt, der Symcon MCP-Server läuft unter der eingetragenen URL.
+
+Die .mcpb-Datei enthält nur einen **Launcher** (stdio→streamable-http Adapter); der eigentliche Symcon-Server muss weiterhin separat laufen (z. B. per `start-mcp-local.sh` oder auf der SymBox).
+
+---
+
+### Variante A: Config-Datei (wenn du keine .mcpb nutzen willst)
 
 Claude Desktop kann MCP-Server auch über eine **Konfigurationsdatei** laden. Dafür brauchst du einen kleinen **Adapter**, der zwischen Claude (stdio) und unserem Server (Streamable HTTP per URL) vermittelt.
 
