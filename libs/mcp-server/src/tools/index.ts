@@ -1,9 +1,11 @@
 /**
  * MCP tool handlers for Symcon API.
  * Each tool maps to Symcon Befehlsreferenz methods.
+ * Wissensbasis-Tools nutzen KnowledgeStore für gelernte Geräte-Zuordnungen.
  */
 
 import type { SymconClient } from '../symcon/SymconClient.js';
+import { getKnowledgeStore } from '../knowledge/KnowledgeStore.js';
 import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
@@ -245,6 +247,188 @@ export function createToolHandlers(client: SymconClient): Record<string, { descr
                 ok: true,
                 message: `${deviceName} in ${location} ${value ? 'ein' : 'aus'}geschaltet (VariableID ${variableId}).`,
               }),
+            },
+          ],
+        };
+      },
+    },
+    symcon_knowledge_get: {
+      description:
+        'Liefert alle gelernten Geräte-Zuordnungen (Wissensbasis). Die KI nutzt das, um „Büro Licht“ etc. auf VariableIDs aufzulösen, oder um dem User Vorschläge zu machen.',
+      inputSchema: z.object({}),
+      handler: async (_args: HandlerArgs) => {
+        const store = getKnowledgeStore();
+        const mappings = await store.getMappings();
+        return { content: [{ type: 'text', text: JSON.stringify({ deviceMappings: mappings }, null, 2) }] };
+      },
+    },
+    symcon_knowledge_set: {
+      description:
+        'Speichert eine Geräte-Zuordnung in der Wissensbasis (Lernen). Nach User-Bestätigung aufrufen, z. B. „Ja, das ist mein Bürolicht.“ → userLabel „Büro Licht“, variableId, variableName „Zustand“, optional path.',
+      inputSchema: z.object({
+        userLabel: z.string().describe('Nutzer-Label, z. B. "Büro Licht", "Bürolicht"'),
+        variableId: z.number().int().positive(),
+        variableName: z.string().describe('Name der Variable in Symcon, z. B. "Zustand"'),
+        path: z.string().optional().describe('Optional: Pfad im Objektbaum, z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand'),
+        objectId: z.number().int().positive().optional(),
+      }),
+      handler: async (args: HandlerArgs) => {
+        const { userLabel, variableId, variableName, path, objectId } = getArgs<{
+          userLabel: string;
+          variableId: number;
+          variableName: string;
+          path?: string;
+          objectId?: number;
+        }>(args);
+        const store = getKnowledgeStore();
+        const entry = await store.addOrUpdateMapping({ userLabel, variableId, variableName, path, objectId });
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, learned: entry }) }] };
+      },
+    },
+    symcon_resolve_device: {
+      description:
+        'Löst eine Nutzer-Phrase (z. B. "Büro Licht", "Licht im Büro") in der Wissensbasis auf. Wenn gefunden: variableId und variableName zurückgeben, dann kann die KI SetValue/RequestAction ausführen.',
+      inputSchema: z.object({
+        userPhrase: z.string().describe('Was der User gesagt hat, z. B. "Büro Licht", "Licht im Büro"'),
+      }),
+      handler: async (args: HandlerArgs) => {
+        const { userPhrase } = getArgs<{ userPhrase: string }>(args);
+        const store = getKnowledgeStore();
+        const mapping = await store.resolve(userPhrase);
+        if (!mapping) {
+          return { content: [{ type: 'text', text: JSON.stringify({ found: false, hint: 'Noch nicht gelernt. KI soll Objektbaum erkunden und User fragen, dann symcon_knowledge_set aufrufen.' }) }] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ found: true, variableId: mapping.variableId, variableName: mapping.variableName, userLabel: mapping.userLabel }) }] };
+      },
+    },
+    symcon_get_variable_by_path: {
+      description:
+        'Ermittelt die VariableID anhand eines Pfads im Objektbaum (z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand). Nützlich zum Lernen: KI findet Pfad, holt variableId, fragt User, speichert mit symcon_knowledge_set.',
+      inputSchema: z.object({
+        path: z.string().describe('Pfad mit / getrennt, z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand'),
+      }),
+      handler: async (args: HandlerArgs) => {
+        const { path: pathStr } = getArgs<{ path: string }>(args);
+        const segments = pathStr.split('/').map((s) => s.trim()).filter(Boolean);
+        if (segments.length === 0) {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'Pfad leer' }) }] };
+        }
+        let parentId = 0;
+        let objectId = 0;
+        for (let i = 0; i < segments.length; i++) {
+          const name = segments[i];
+          const childIds = await client.getChildrenIds(parentId);
+          let found = false;
+          for (const id of childIds) {
+            const obj = (await client.getObject(id)) as { Name?: string; ObjectType?: number };
+            const objName = String(obj?.Name ?? '').trim();
+            if (objName === name || objName.toLowerCase() === name.toLowerCase()) {
+              parentId = id;
+              objectId = id;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: `Segment "${name}" nicht gefunden unter Parent ${parentId}`, segmentIndex: i }) }] };
+          }
+        }
+        const obj = (await client.getObject(objectId)) as { ObjectType?: number };
+        const type = Number(obj?.ObjectType ?? -1);
+        if (type !== 2) {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: `Letztes Objekt (${objectId}) ist keine Variable (ObjectType ${type}, erwartet 2)` }) }] };
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, variableId: objectId, variableName: segments[segments.length - 1], path: pathStr }) }] };
+      },
+    },
+    symcon_snapshot_variables: {
+      description:
+        'Liefert einen Snapshot aller Variablenwerte unter einer Wurzel (Vorher-Zustand). Nutzen: Wenn die KI nicht weiß, welches Gerät der User meint, zuerst diesen Snapshot aufrufen, dann den User bitten (z. B. „Schalte das Licht bitte kurz ein“), danach symcon_diff_variables mit diesem Snapshot aufrufen – die geänderten Variablen zeigen, welches Licht/Gerät gemeint ist. Optional rootId z. B. Räume/Erdgeschoss/Flur (Objekt-ID), um nur einen Bereich zu erfassen.',
+      inputSchema: z.object({
+        rootId: z.number().int().min(0).optional().describe('Wurzel (0 = gesamter Baum); z. B. Objekt-ID eines Raums wie Flur'),
+        maxDepth: z.number().int().min(1).max(6).optional().describe('Maximale Tiefe (Standard 5)'),
+      }),
+      handler: async (args: HandlerArgs) => {
+        const { rootId = 0, maxDepth = 5 } = getArgs<{ rootId?: number; maxDepth?: number }>(args);
+        type Obj = { ObjectType?: number };
+        const collectVariables = async (id: number, depth: number): Promise<{ variableId: number; value: unknown }[]> => {
+          const out: { variableId: number; value: unknown }[] = [];
+          if (depth > maxDepth) return out;
+          let objectType = -1;
+          if (id > 0) {
+            try {
+              const obj = (await client.getObject(id)) as Obj;
+              objectType = Number(obj?.ObjectType ?? -1);
+            } catch {
+              return out;
+            }
+          }
+          if (objectType === 2) {
+            try {
+              const value = await client.getValue(id);
+              out.push({ variableId: id, value });
+            } catch {
+              // Variable lesen fehlgeschlagen, überspringen
+            }
+            return out;
+          }
+          const childIds = await client.getChildrenIds(id);
+          for (const cid of childIds) {
+            const sub = await collectVariables(cid, depth + 1);
+            out.push(...sub);
+          }
+          return out;
+        };
+        const snapshot = await collectVariables(rootId, 0);
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                JSON.stringify(snapshot, null, 2) +
+                '\n\nHinweis: Diesen Snapshot (als JSON-Array) bei symcon_diff_variables als previousSnapshotJson übergeben, nachdem der User eine Aktion ausgeführt hat.',
+            },
+          ],
+        };
+      },
+    },
+    symcon_diff_variables: {
+      description:
+        'Vergleicht den aktuellen Variablenzustand mit einem früheren Snapshot (symcon_snapshot_variables). Liefert alle Variablen, deren Wert sich geändert hat (variableId, oldValue, newValue). Nutzen: User bittet z. B. „Schalte das Licht ein“ → KI vergleicht Vorher-Snapshot mit Jetzt → geänderte Variable = das gemeinte Licht; danach lernen (symcon_knowledge_set) oder steuern.',
+      inputSchema: z.object({
+        previousSnapshotJson: z
+          .string()
+          .describe('JSON-Array aus symcon_snapshot_variables, z. B. [{"variableId":123,"value":false},...]'),
+      }),
+      handler: async (args: HandlerArgs) => {
+        const { previousSnapshotJson } = getArgs<{ previousSnapshotJson: string }>(args);
+        let previous: { variableId: number; value: unknown }[];
+        try {
+          previous = JSON.parse(previousSnapshotJson) as { variableId: number; value: unknown }[];
+          if (!Array.isArray(previous)) throw new Error('Kein Array');
+        } catch {
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'previousSnapshotJson muss ein gültiges JSON-Array von { variableId, value } sein.' }) }] };
+        }
+        const changes: { variableId: number; oldValue: unknown; newValue: unknown }[] = [];
+        for (const { variableId, value: oldValue } of previous) {
+          try {
+            const newValue = await client.getValue(variableId);
+            if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+              changes.push({ variableId, oldValue, newValue });
+            }
+          } catch {
+            // Variable nicht mehr lesbar oder fehlgeschlagen, überspringen
+          }
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                JSON.stringify(changes, null, 2) +
+                (changes.length > 0
+                  ? '\n\nGeänderte Variablen: variableId für symcon_set_value/symcon_get_object/symcon_knowledge_set nutzen.'
+                  : '\n\nKeine Änderungen. User evtl. bitten, die Aktion auszuführen, oder anderen Bereich (rootId) snappen.'),
             },
           ],
         };

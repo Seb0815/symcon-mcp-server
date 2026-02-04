@@ -310,5 +310,99 @@ export function createToolHandlers(client) {
                 return { content: [{ type: 'text', text: JSON.stringify({ ok: true, variableId: objectId, variableName: segments[segments.length - 1], path: pathStr }) }] };
             },
         },
+        symcon_snapshot_variables: {
+            description: 'Liefert einen Snapshot aller Variablenwerte unter einer Wurzel (Vorher-Zustand). Nutzen: Wenn die KI nicht weiß, welches Gerät der User meint, zuerst diesen Snapshot aufrufen, dann den User bitten (z. B. „Schalte das Licht bitte kurz ein“), danach symcon_diff_variables mit diesem Snapshot aufrufen – die geänderten Variablen zeigen, welches Licht/Gerät gemeint ist. Optional rootId z. B. Räume/Erdgeschoss/Flur (Objekt-ID), um nur einen Bereich zu erfassen.',
+            inputSchema: z.object({
+                rootId: z.number().int().min(0).optional().describe('Wurzel (0 = gesamter Baum); z. B. Objekt-ID eines Raums wie Flur'),
+                maxDepth: z.number().int().min(1).max(6).optional().describe('Maximale Tiefe (Standard 5)'),
+            }),
+            handler: async (args) => {
+                const { rootId = 0, maxDepth = 5 } = getArgs(args);
+                const collectVariables = async (id, depth) => {
+                    const out = [];
+                    if (depth > maxDepth)
+                        return out;
+                    let objectType = -1;
+                    if (id > 0) {
+                        try {
+                            const obj = (await client.getObject(id));
+                            objectType = Number(obj?.ObjectType ?? -1);
+                        }
+                        catch {
+                            return out;
+                        }
+                    }
+                    if (objectType === 2) {
+                        try {
+                            const value = await client.getValue(id);
+                            out.push({ variableId: id, value });
+                        }
+                        catch {
+                            // Variable lesen fehlgeschlagen, überspringen
+                        }
+                        return out;
+                    }
+                    const childIds = await client.getChildrenIds(id);
+                    for (const cid of childIds) {
+                        const sub = await collectVariables(cid, depth + 1);
+                        out.push(...sub);
+                    }
+                    return out;
+                };
+                const snapshot = await collectVariables(rootId, 0);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(snapshot, null, 2) +
+                                '\n\nHinweis: Diesen Snapshot (als JSON-Array) bei symcon_diff_variables als previousSnapshotJson übergeben, nachdem der User eine Aktion ausgeführt hat.',
+                        },
+                    ],
+                };
+            },
+        },
+        symcon_diff_variables: {
+            description: 'Vergleicht den aktuellen Variablenzustand mit einem früheren Snapshot (symcon_snapshot_variables). Liefert alle Variablen, deren Wert sich geändert hat (variableId, oldValue, newValue). Nutzen: User bittet z. B. „Schalte das Licht ein“ → KI vergleicht Vorher-Snapshot mit Jetzt → geänderte Variable = das gemeinte Licht; danach lernen (symcon_knowledge_set) oder steuern.',
+            inputSchema: z.object({
+                previousSnapshotJson: z
+                    .string()
+                    .describe('JSON-Array aus symcon_snapshot_variables, z. B. [{"variableId":123,"value":false},...]'),
+            }),
+            handler: async (args) => {
+                const { previousSnapshotJson } = getArgs(args);
+                let previous;
+                try {
+                    previous = JSON.parse(previousSnapshotJson);
+                    if (!Array.isArray(previous))
+                        throw new Error('Kein Array');
+                }
+                catch {
+                    return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'previousSnapshotJson muss ein gültiges JSON-Array von { variableId, value } sein.' }) }] };
+                }
+                const changes = [];
+                for (const { variableId, value: oldValue } of previous) {
+                    try {
+                        const newValue = await client.getValue(variableId);
+                        if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+                            changes.push({ variableId, oldValue, newValue });
+                        }
+                    }
+                    catch {
+                        // Variable nicht mehr lesbar oder fehlgeschlagen, überspringen
+                    }
+                }
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(changes, null, 2) +
+                                (changes.length > 0
+                                    ? '\n\nGeänderte Variablen: variableId für symcon_set_value/symcon_get_object/symcon_knowledge_set nutzen.'
+                                    : '\n\nKeine Änderungen. User evtl. bitten, die Aktion auszuführen, oder anderen Bereich (rootId) snappen.'),
+                        },
+                    ],
+                };
+            },
+        },
     };
 }
