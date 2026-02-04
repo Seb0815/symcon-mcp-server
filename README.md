@@ -42,7 +42,7 @@ Die Symcon-API bleibt auf dem Gerät, auf dem Symcon läuft (SymBox/PC); der MCP
 
 - **Port:** TCP-Port für den MCP-Server (Streamable HTTP).
 - **Symcon API URL:** Basis-URL der Symcon JSON-RPC API (z. B. `http://127.0.0.1:3777/api/`).
-- **API-Key (optional):** Wenn gesetzt, müssen Clients den Key mitsenden (Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>`). Ohne Key ist der MCP-Server für jeden im Netzwerk erreichbar – für Produktion empfohlen.
+- **API-Key (optional):** Wenn gesetzt, müssen Clients den Key mitsenden (Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>`). Ohne Key ist der MCP-Server für jeden im Netzwerk erreichbar – für Produktion nur mit Key empfohlen.
 - **Aktiv:** MCP-Server starten/beenden mit den Instanz-Änderungen.
 
 ## MCP-Tools
@@ -79,3 +79,4 @@ Ein MCP-Client (z. B. ein KI-fähiger Editor oder ein eigener KI-Assistent) ve
 - [docs/STEUERUNG_HINWEISE.md](docs/STEUERUNG_HINWEISE.md) – Steuerungshinweise für KI und MCP-Clients (z. B. Hue: RequestAction für Ein/Aus und Helligkeit, Skala 0–254).
 - [docs/CLAUDE_EINBINDEN.md](docs/CLAUDE_EINBINDEN.md) – Claude/.mcpb-Einbindung.
 - [docs/MODULREFERENZ.md](docs/MODULREFERENZ.md) – Modulreferenz (Geräte) von Symcon.
+- [docs/AUTOMATION_ORDNERSTRUKTUR.md](docs/AUTOMATION_ORDNERSTRUKTUR.md) – Ordnerlogik für MCP-Automationen (Skripte/Events: thematisch und optional nach Räumen).
