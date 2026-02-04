@@ -33,11 +33,23 @@ export declare class SymconClient {
     call<T = unknown>(method: string, params?: unknown[] | Record<string, unknown>): Promise<T>;
     private paramsToArray;
     getValue(variableId: number): Promise<unknown>;
+    /**
+     * Normalisiert den Wert für SetValue/RequestAction.
+     * Symcon erwartet bei Float-Variablen (z. B. Level ~Intensity.1) einen passenden Typ;
+     * über JSON-RPC werden ganze Zahlen als Integer übergeben, was zu "Parameter type of Value does not match" führt.
+     * Zahlen werden daher als String gesendet, damit Symcon sie in den Variablentyp konvertieren kann.
+     */
+    private normalizeValue;
     setValue(variableId: number, value: unknown): Promise<void>;
     requestAction(variableId: number, value?: unknown): Promise<void>;
     getObject(objectId: number): Promise<unknown>;
     getChildrenIds(parentId: number): Promise<number[]>;
     runScript(scriptId: number): Promise<unknown>;
+    /**
+     * Startet ein Skript mit Parametern (asynchron). Das aufgerufene Skript erhält die Keys
+     * von params in $_IPS (z. B. params.VariableID → $_IPS['VariableID']).
+     */
+    runScriptEx(scriptId: number, params: Record<string, unknown>): Promise<unknown>;
     getObjectIdByName(name: string, parentId?: number): Promise<number>;
     getVariable(variableId: number): Promise<unknown>;
     createCategory(): Promise<number>;
@@ -56,6 +68,14 @@ export declare class SymconClient {
     setEventActive(eventId: number, active: boolean): Promise<boolean>;
     deleteEvent(eventId: number): Promise<boolean>;
     getEvent(eventId: number): Promise<unknown>;
+    /** Name des MCP-Control-Skripts für verzögerte Aktionen (Timer). Wird unter MCP Automations/Timer angelegt. */
+    static readonly MCP_DELAYED_ACTION_CONTROL_SCRIPT_NAME = "MCP Delayed Action Control";
+    /**
+     * Erstellt oder liefert die Script-ID des MCP Control-Skripts für verzögerte Aktionen.
+     * Das Skript erwartet per IPS_RunScriptEx: VariableID, Value, DelaySeconds.
+     * Es erzeugt ein einmaliges Skript (sleep → RequestAction → IPS_DeleteScript(self)) und startet es asynchron.
+     */
+    getOrCreateDelayedActionControlScript(): Promise<number>;
     /**
      * Erstellt die Kategorie-Pfadkette unter parentId. Für jedes Segment: existiert bereits eine
      * Kategorie mit diesem Namen unter dem aktuellen Parent, wird deren ID genutzt; sonst wird

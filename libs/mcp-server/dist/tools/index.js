@@ -105,7 +105,7 @@ export function createToolHandlers(client) {
             },
         },
         symcon_get_object_tree: {
-            description: 'Liefert den Objektbaum ab einer Wurzel (Discovery). Jeder Knoten: ObjectID, Name, ObjectType (0=Kategorie, 1=Instanz, 2=Variable), children. Die KI soll zuerst diesen Baum aufrufen, die Struktur sinnhaft verstehen (welcher Ort, welches Gerät), dann passend steuern.',
+            description: 'Liefert den Objektbaum ab einer Wurzel (Discovery). Jeder Knoten: ObjectID, Name, ObjectType (0=Kategorie, 1=Instanz, 2=Variable), children. Bei mehreren Kandidaten: Gefundene Objekte in normaler Sprache vorlesen und User fragen (Verhalten siehe symcon_resolve_device bei found: false: instructions, askUserExamples).',
             inputSchema: z.object({
                 rootId: z.number().int().min(0).optional().describe('Wurzel (0 = Root); Standard 0'),
                 maxDepth: z.number().int().min(1).max(6).optional().describe('Maximale Tiefe (Standard 4)'),
@@ -118,7 +118,7 @@ export function createToolHandlers(client) {
                     if (id > 0) {
                         try {
                             const obj = (await client.getObject(id));
-                            name = String(obj?.Name ?? '').trim() || `Objekt ${id}`;
+                            name = String(obj?.ObjectName ?? obj?.Name ?? '').trim() || `Objekt ${id}`;
                             objectType = Number(obj?.ObjectType ?? 0);
                         }
                         catch {
@@ -164,7 +164,7 @@ export function createToolHandlers(client) {
                     locationId = 0;
                     for (const id of rootIds) {
                         const obj = (await client.getObject(id));
-                        const name = String(obj?.Name ?? '').trim().toLowerCase();
+                        const name = String(obj?.ObjectName ?? obj?.Name ?? '').trim().toLowerCase();
                         if (name === locNorm || name.includes(locNorm) || locNorm.includes(name)) {
                             locationId = id;
                             found = true;
@@ -189,7 +189,7 @@ export function createToolHandlers(client) {
                 let variableId = null;
                 for (const id of childIds) {
                     const obj = (await client.getObject(id));
-                    const name = String(obj?.Name ?? '').trim().toLowerCase();
+                    const name = String(obj?.ObjectName ?? obj?.Name ?? '').trim().toLowerCase();
                     const type = Number(obj?.ObjectType ?? -1);
                     const nameMatch = name === devNorm || name.includes(devNorm) || devNorm.includes(name);
                     if (nameMatch && type === 2) {
@@ -237,12 +237,28 @@ export function createToolHandlers(client) {
             },
         },
         symcon_knowledge_get: {
-            description: 'Liefert alle gelernten Geräte-Zuordnungen (Wissensbasis). Die KI nutzt das, um „Büro Licht“ etc. auf VariableIDs aufzulösen, oder um dem User Vorschläge zu machen.',
+            description: 'Liefert deviceMappings, conventions, controlRules (Steuerungsregeln pro Akteur, z. B. Rolllade auf/zu) und usageHint. KI nutzt controlRules für „auf“/„zu“ etc.; bei User-Korrektur „andersrum“ symcon_knowledge_correct_direction aufrufen.',
             inputSchema: z.object({}),
             handler: async (_args) => {
                 const store = getKnowledgeStore();
-                const mappings = await store.getMappings();
-                return { content: [{ type: 'text', text: JSON.stringify({ deviceMappings: mappings }, null, 2) }] };
+                const [mappings, conventions, controlRules] = await Promise.all([
+                    store.getMappings(),
+                    store.getConventions(),
+                    store.getControlRules(),
+                ]);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                deviceMappings: mappings,
+                                conventions,
+                                controlRules,
+                                usageHint: 'Bei nicht gefunden oder mehreren Kandidaten: Nur relevanten Bereich erkunden, Gefundenes vorlesen und User fragen. Für Akteure (z. B. Rolllade): symcon_get_module_reference nachschlagen, Steuerung mit symcon_knowledge_set_control_rule speichern. Bei User „das war falsch rum“: symcon_knowledge_correct_direction(variableId) aufrufen.',
+                            }, null, 2),
+                        },
+                    ],
+                };
             },
         },
         symcon_knowledge_set: {
@@ -261,23 +277,133 @@ export function createToolHandlers(client) {
                 return { content: [{ type: 'text', text: JSON.stringify({ ok: true, learned: entry }) }] };
             },
         },
+        symcon_knowledge_set_convention: {
+            description: 'Speichert eine Konvention/Hinweis in der Wissensbasis (z. B. key "LI" = "Licht", key "SD" = "Steckdose"). Die KI nutzt das bei der Suche im Objektbaum (z. B. bei „Licht“ nur Objekte mit LI, SD ausschließen) und kann Rückfragen stellen. Generell nutzbar für beliebige Abkürzungen/Bezeichnungen.',
+            inputSchema: z.object({
+                key: z.string().describe('Kurzform/Code in Objektnamen, z. B. "LI", "SD"'),
+                meaning: z.string().describe('Bedeutung, z. B. "Licht", "Steckdose"'),
+                description: z
+                    .string()
+                    .optional()
+                    .describe('Optional: Hinweis für die KI, z. B. "Bei Licht-Steuerung nur Objekte mit LI; SD ausschließen."'),
+            }),
+            handler: async (args) => {
+                const { key, meaning, description } = getArgs(args);
+                const store = getKnowledgeStore();
+                const entry = await store.addOrUpdateConvention({ key, meaning, description });
+                return { content: [{ type: 'text', text: JSON.stringify({ ok: true, convention: entry }) }] };
+            },
+        },
+        symcon_knowledge_set_control_rule: {
+            description: 'Speichert eine Steuerungsregel für einen Akteur (z. B. Rolllade: „auf“ = 0, „zu“ = 100). Nach Modulreferenz (symcon_get_module_reference) oder nach dem Lernen aufrufen. actions: Objekt mit Aktion → Wert, z. B. { "auf": 0, "zu": 100, "aufmachen": 0, "zumachen": 100 } oder { "ein": true, "aus": false }. Optional source (module_reference, learned), note.',
+            inputSchema: z.object({
+                variableId: z.number().int().positive(),
+                variableName: z.string().optional(),
+                deviceType: z.string().optional().describe('z. B. "Rolllade", "Licht"'),
+                actions: z.record(z.union([z.number(), z.boolean()])).describe('Aktion → Wert, z. B. { "auf": 0, "zu": 100 }'),
+                source: z.string().optional().describe('z. B. module_reference, learned'),
+                note: z.string().optional(),
+            }),
+            handler: async (args) => {
+                const { variableId, variableName, deviceType, actions, source, note } = getArgs(args);
+                const store = getKnowledgeStore();
+                const entry = await store.addOrUpdateControlRule({
+                    variableId,
+                    variableName,
+                    deviceType,
+                    actions: { ...actions },
+                    source,
+                    note,
+                });
+                return { content: [{ type: 'text', text: JSON.stringify({ ok: true, controlRule: entry }) }] };
+            },
+        },
+        symcon_knowledge_get_control_rule: {
+            description: 'Liefert die Steuerungsregel für eine Variable (variableId). Falls vorhanden: actions (z. B. auf/zu) für RequestAction/SetValue nutzen. Sonst Modulreferenz nachschlagen und symcon_knowledge_set_control_rule aufrufen.',
+            inputSchema: z.object({
+                variableId: z.number().int().positive(),
+            }),
+            handler: async (args) => {
+                const { variableId } = getArgs(args);
+                const store = getKnowledgeStore();
+                const rule = await store.getControlRuleByVariableId(variableId);
+                return {
+                    content: [{ type: 'text', text: JSON.stringify(rule ? { found: true, controlRule: rule } : { found: false }) }],
+                };
+            },
+        },
+        symcon_knowledge_correct_direction: {
+            description: 'Tauscht die Werte für „auf“/„zu“ (bzw. aufmachen/zumachen, open/close) bei der Steuerungsregel für variableId. Aufrufen, wenn der User korrigiert: „das war falsch rum“, „das geht andersrum“ – dann beim nächsten Mal die richtige Richtung nutzen.',
+            inputSchema: z.object({
+                variableId: z.number().int().positive(),
+                note: z.string().optional().describe('Optional: z. B. "User sagte: andersrum"'),
+            }),
+            handler: async (args) => {
+                const { variableId, note } = getArgs(args);
+                const store = getKnowledgeStore();
+                const rule = await store.correctDirection(variableId, note);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(rule
+                                ? { ok: true, controlRule: rule, hint: 'Auf/Zu-Werte getauscht. Beim nächsten Mal wird die richtige Richtung genutzt.' }
+                                : { ok: false, error: 'Keine Steuerungsregel für diese variableId gefunden. Zuerst symcon_knowledge_set_control_rule aufrufen.' }),
+                        },
+                    ],
+                };
+            },
+        },
         symcon_resolve_device: {
-            description: 'Löst eine Nutzer-Phrase (z. B. "Büro Licht", "Licht im Büro") in der Wissensbasis auf. Wenn gefunden: variableId und variableName zurückgeben, dann kann die KI SetValue/RequestAction ausführen.',
+            description: 'Löst eine Nutzer-Phrase (z. B. "Büro Licht", "Licht im Büro") in der Wissensbasis auf. Wenn gefunden: variableId und variableName. Wenn found: false: conventions, instructions (explore, tellUser, ask, then) und askUserExamples mitliefern – KI soll sich an instructions halten (zügig erkunden, vorlesen, fragen, dann symcon_knowledge_set).',
             inputSchema: z.object({
                 userPhrase: z.string().describe('Was der User gesagt hat, z. B. "Büro Licht", "Licht im Büro"'),
             }),
             handler: async (args) => {
                 const { userPhrase } = getArgs(args);
                 const store = getKnowledgeStore();
-                const mapping = await store.resolve(userPhrase);
+                const [mapping, conventions] = await Promise.all([store.resolve(userPhrase), store.getConventions()]);
                 if (!mapping) {
-                    return { content: [{ type: 'text', text: JSON.stringify({ found: false, hint: 'Noch nicht gelernt. KI soll Objektbaum erkunden und User fragen, dann symcon_knowledge_set aufrufen.' }) }] };
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    found: false,
+                                    hint: 'Noch nicht gelernt. Verhalten siehe instructions.',
+                                    conventions,
+                                    instructions: {
+                                        explore: 'Nur den relevanten Bereich erkunden (z. B. einen Raum mit symcon_get_object_tree(rootId: raumObjectId, maxDepth: 4)), nicht den ganzen Baum.',
+                                        tellUser: 'Gefundene Geräte/Knoten in normaler Sprache vorlesen (z. B. „Im Wohnzimmer sehe ich: Stehlampe, Deckenlicht Mitte, TV-Licht“).',
+                                        ask: 'User konkret fragen, z. B. „Welches meinst du?“ oder „Soll die Stehlampe dein Couch-Licht sein?“',
+                                        then: 'Bei Bestätigung symcon_knowledge_set aufrufen, danach gewünschte Aktion ausführen.',
+                                    },
+                                    askUserExamples: [
+                                        'Im Wohnzimmer habe ich gefunden: Stehlampe, Deckenlicht Mitte, TV-Licht. Welches meinst du?',
+                                        'Soll die Stehlampe dein Couch-Licht sein?',
+                                    ],
+                                }, null, 2),
+                            },
+                        ],
+                    };
                 }
-                return { content: [{ type: 'text', text: JSON.stringify({ found: true, variableId: mapping.variableId, variableName: mapping.variableName, userLabel: mapping.userLabel }) }] };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                found: true,
+                                variableId: mapping.variableId,
+                                variableName: mapping.variableName,
+                                userLabel: mapping.userLabel,
+                            }),
+                        },
+                    ],
+                };
             },
         },
         symcon_get_variable_by_path: {
-            description: 'Ermittelt die VariableID anhand eines Pfads im Objektbaum (z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand). Nützlich zum Lernen: KI findet Pfad, holt variableId, fragt User, speichert mit symcon_knowledge_set.',
+            description: 'Ermittelt die VariableID anhand eines Pfads im Objektbaum (z. B. Räume/Erdgeschoss/Büro/eg-bu-li-1/Zustand). Bei ok: true sofort variableId nutzen (symcon_knowledge_set, symcon_request_action, symcon_schedule_once) – keine weitere Suche. Nützlich zum Lernen: KI findet Pfad, holt variableId, fragt User, speichert mit symcon_knowledge_set.',
             inputSchema: z.object({
                 path: z.string().describe('Pfad mit / getrennt, z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand'),
             }),
@@ -295,7 +421,7 @@ export function createToolHandlers(client) {
                     let found = false;
                     for (const id of childIds) {
                         const obj = (await client.getObject(id));
-                        const objName = String(obj?.Name ?? '').trim();
+                        const objName = String(obj?.ObjectName ?? obj?.Name ?? '').trim();
                         if (objName === name || objName.toLowerCase() === name.toLowerCase()) {
                             parentId = id;
                             objectId = id;
@@ -502,7 +628,7 @@ export function createToolHandlers(client) {
             },
         },
         symcon_schedule_once: {
-            description: 'Legt eine einmalige zeitverzögerte Aktion an (z. B. „Rolllade in 10 Minuten auf“). Erstellt Skript (RequestAction) und zyklisches Event „once“ mit Zeitgrenze jetzt + Verzögerung, ordnet unter categoryPath ein (Default: MCP Automations/Timer), speichert in der Automation-Registry mit theme „Timer“. value: true/„auf“/„ein“ = an, false/„zu“/„aus“ = aus.',
+            description: 'Legt eine einmalige zeitverzögerte Aktion an (z. B. „Licht in 1 Minute an“). Nutzt wenn möglich die Symcon-Timer-API (IPS_SetEventCyclicDateBounds). Fallback: ein Skript pro Timer mit Sleep bis Zielzeit, dann RequestAction, dann Event und Skript selbst löschen (IPS_DeleteEvent, sleep, RequestAction, IPS_DeleteScript).',
             inputSchema: z.object({
                 variableId: z.number().int().positive(),
                 value: z.union([z.string(), z.number(), z.boolean()]).describe('true/auf/ein = an, false/zu/aus = aus'),
@@ -521,47 +647,70 @@ export function createToolHandlers(client) {
                 const fullPath = path[0] === MCP_AUTOMATIONS_ROOT ? path : [MCP_AUTOMATIONS_ROOT, ...path];
                 const categoryId = await client.getOrCreateCategoryPath(0, fullPath);
                 const actionValue = typeof value === 'string' ? (value.toLowerCase() === 'aus' || value.toLowerCase() === 'zu' || value.toLowerCase() === 'off' ? false : true) : Boolean(value);
-                const scriptId = await client.createScript(0);
-                const scriptContent = `<?php\nRequestAction(${variableId}, ${actionValue ? 'true' : 'false'});\n`;
-                await client.setScriptContent(scriptId, scriptContent);
                 const scriptName = labelArg?.trim() || `Timer ${variableId} in ${delayTotalSeconds}s`;
-                await client.setName(scriptId, scriptName);
-                await client.setParent(scriptId, categoryId);
-                const eventId = await client.createEvent(1);
-                const runScriptCode = `IPS_RunScript(${scriptId});`;
-                await client.setEventScript(eventId, runScriptCode);
                 const now = Math.floor(Date.now() / 1000);
                 const targetTs = now + delayTotalSeconds;
-                await client.setEventCyclic(eventId, 1, 0, 0, 0, 0, 0);
-                await client.setEventCyclicDateBounds(eventId, targetTs, targetTs);
-                await client.setEventCyclicTimeBounds(eventId, targetTs, 0);
-                await client.setEventActive(eventId, true);
-                await client.setName(eventId, scriptName + ' (Event)');
-                await client.setParent(eventId, categoryId);
-                const store = getAutomationStore();
-                const entry = await store.addOrUpdate({
-                    label: labelArg?.trim() || `Timer ${variableId} ${delayTotalSeconds}s`,
-                    categoryPath: fullPath,
-                    scriptId,
-                    eventIds: [eventId],
-                    theme: 'Timer',
-                });
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify({
-                                ok: true,
-                                scriptId,
-                                eventId,
-                                categoryId,
-                                categoryPath: fullPath,
-                                runsAtUnix: targetTs,
-                                automationId: entry.automationId,
-                            }),
-                        },
-                    ],
+                /** Wert für RequestAction: bei String zu/aus/off → false, sonst true; bei Zahl/boolean unverändert (z. B. Rolllade 0/100). */
+                const valueForAction = typeof value === 'string' ? (value.toLowerCase() === 'aus' || value.toLowerCase() === 'zu' || value.toLowerCase() === 'off' ? false : true) : value;
+                const runPrimary = async () => {
+                    const scriptId = await client.createScript(0);
+                    const scriptContent = `<?php\nRequestAction(${variableId}, ${actionValue ? 'true' : 'false'});\n`;
+                    await client.setScriptContent(scriptId, scriptContent);
+                    await client.setName(scriptId, scriptName);
+                    await client.setParent(scriptId, categoryId);
+                    const eventId = await client.createEvent(1);
+                    await client.setEventScript(eventId, `IPS_RunScript(${scriptId});`);
+                    try {
+                        await client.setEventCyclic(eventId, 1, 0, 0, 0, 0, 0);
+                        await client.setEventCyclicDateBounds(eventId, targetTs, targetTs);
+                        await client.setEventCyclicTimeBounds(eventId, targetTs, 0);
+                    }
+                    catch (e) {
+                        await client.deleteEvent(eventId);
+                        await client.deleteScript(scriptId);
+                        throw e;
+                    }
+                    await client.setEventActive(eventId, true);
+                    await client.setName(eventId, scriptName + ' (Event)');
+                    await client.setParent(eventId, categoryId);
+                    const store = getAutomationStore();
+                    const entry = await store.addOrUpdate({
+                        label: labelArg?.trim() || `Timer ${variableId} ${delayTotalSeconds}s`,
+                        categoryPath: fullPath,
+                        scriptId,
+                        eventIds: [eventId],
+                        theme: 'Timer',
+                    });
+                    return { ok: true, scriptId, eventId, categoryId, categoryPath: fullPath, runsAtUnix: targetTs, automationId: entry.automationId };
                 };
+                const runControlScriptFallback = async () => {
+                    const controlScriptId = await client.getOrCreateDelayedActionControlScript();
+                    await client.runScriptEx(controlScriptId, {
+                        VariableID: variableId,
+                        Value: valueForAction,
+                        DelaySeconds: delayTotalSeconds,
+                    });
+                    return {
+                        ok: true,
+                        controlScript: true,
+                        runsAtUnix: targetTs,
+                        hint: 'Timer-API nicht verfügbar. MCP Delayed Action Control-Skript erstellt/verwendet: erzeugt einmaliges Skript (sleep → RequestAction → Selbstlöschung) und startet es asynchron.',
+                    };
+                };
+                try {
+                    const result = await runPrimary();
+                    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+                }
+                catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    const useFallback = msg.includes('SetEventCyclicDateBounds') || msg.includes('SetEventCyclicTimeBounds') || msg.includes('-44001') || msg.includes('not found');
+                    if (!useFallback)
+                        throw err;
+                    const result = await runControlScriptFallback();
+                    return {
+                        content: [{ type: 'text', text: JSON.stringify(result) }],
+                    };
+                }
             },
         },
         symcon_script_create: {

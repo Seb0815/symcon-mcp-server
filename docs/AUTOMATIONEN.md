@@ -28,7 +28,7 @@ Die KI soll beim Anlegen immer **symcon_automation_get_or_create_folder** mit ei
 | Tool | Zweck |
 |------|--------|
 | **symcon_automation_get_or_create_folder(categoryPath)** | Erstellt oder liefert die Kategorie-Pfadkette (rootCategoryId, categoryId, path). |
-| **symcon_schedule_once(variableId, value, delayMinutes?, delaySeconds?, label?, categoryPath?)** | Einmalige zeitverzögerte Aktion (RequestAction). Ordner Default: MCP Automations/Timer. Registriert in Registry mit theme „Timer“. |
+| **symcon_schedule_once(variableId, value, delayMinutes?, delaySeconds?, label?, categoryPath?)** | Einmalige zeitverzögerte Aktion (RequestAction). Nutzt Symcon-Timer-API (IPS_SetEventCyclicDateBounds). **Fallback**, wenn API nicht verfügbar: **MCP Delayed Action Control** – ein festes Control-Skript unter *MCP Automations/Timer*, dem VariableID, Value und DelaySeconds per IPS_RunScriptEx übergeben werden; es erzeugt ein einmaliges Skript (sleep → RequestAction → IPS_DeleteScript(self)) und startet es asynchron. Beliebige Werte (z. B. Rolllade 0/100) werden durchgereicht. |
 | **symcon_script_create(name, content, categoryPath? \| parentCategoryId)** | PHP-Skript anlegen, Inhalt setzen, unter Kategorie einordnen. |
 | **symcon_script_set_content(scriptId, content)** | Skript-Inhalt aktualisieren. |
 | **symcon_script_delete(scriptId)** | Skript löschen (Events vorher löschen oder trennen). |
@@ -37,6 +37,16 @@ Die KI soll beim Anlegen immer **symcon_automation_get_or_create_folder** mit ei
 | **symcon_automation_list(theme?, room?, categoryPath?)** | Registry durchsuchen – vor dem Anlegen prüfen, ob bereits Eintrag existiert (z. B. „Ambiente-Licht Zeiten“). |
 | **symcon_automation_register(label, categoryPath, scriptId, eventIds?, room?, theme?)** | Eintrag in Registry anlegen/aktualisieren. |
 | **symcon_automation_unregister(automationId)** | Eintrag aus Registry entfernen (Skripte/Events werden nicht gelöscht). |
+
+## Timer-Fallback: MCP Delayed Action Control (wenn Timer-API fehlt)
+
+Wenn **IPS_SetEventCyclicDateBounds** oder **IPS_SetEventCyclicTimeBounds** nicht verfügbar sind, nutzt symcon_schedule_once ein **Control-Skript** in Symcon:
+
+1. **MCP Delayed Action Control** – wird beim ersten Fallback-Aufruf unter *MCP Automations / Timer* angelegt (falls noch nicht vorhanden). Name: „MCP Delayed Action Control“.
+2. Der MCP-Server ruft es per **IPS_RunScriptEx** mit den Parametern **VariableID**, **Value**, **DelaySeconds** auf (asynchron).
+3. Das Control-Skript erzeugt ein **einmaliges** PHP-Skript mit: `sleep(DelaySeconds); RequestAction(VariableID, Value); IPS_DeleteScript($_IPS['SELF']);` und startet es mit **IPS_RunScript** (asynchron). Das einmalige Skript läuft im Hintergrund und löscht sich nach der Aktion selbst.
+
+So können temporäre Timer-Skripte verlässlich wieder entfernt werden; es bleibt nur das eine permanente Control-Skript. **Value** kann boolean (Licht ein/aus), Zahl (z. B. Rolllade 0/100) oder String sein – der MCP übergibt den Wert unverändert (bei String „zu“/„aus“/„off“ wird für den Fallback false, sonst true verwendet).
 
 ## Keine Duplikate – Registry nutzen
 

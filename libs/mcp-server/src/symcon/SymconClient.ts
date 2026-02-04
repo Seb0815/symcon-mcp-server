@@ -82,6 +82,7 @@ export class SymconClient {
       IPS_GetObject: ['ObjectID'],
       IPS_GetChildrenIDs: ['ParentID'],
       IPS_RunScript: ['ScriptID'],
+      IPS_RunScriptEx: ['ScriptID', 'Parameters'],
       IPS_GetVariable: ['VariableID'],
       IPS_GetObjectIDByName: ['Name', 'ParentID'],
       IPS_CreateCategory: [],
@@ -109,12 +110,25 @@ export class SymconClient {
     return this.call('GetValue', [variableId]);
   }
 
+  /**
+   * Normalisiert den Wert für SetValue/RequestAction.
+   * Symcon erwartet bei Float-Variablen (z. B. Level ~Intensity.1) einen passenden Typ;
+   * über JSON-RPC werden ganze Zahlen als Integer übergeben, was zu "Parameter type of Value does not match" führt.
+   * Zahlen werden daher als String gesendet, damit Symcon sie in den Variablentyp konvertieren kann.
+   */
+  private normalizeValue(value: unknown): unknown {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    return value;
+  }
+
   async setValue(variableId: number, value: unknown): Promise<void> {
-    return this.call('SetValue', [variableId, value]);
+    return this.call('SetValue', [variableId, this.normalizeValue(value)]);
   }
 
   async requestAction(variableId: number, value: unknown = true): Promise<void> {
-    return this.call('RequestAction', [variableId, value]);
+    return this.call('RequestAction', [variableId, this.normalizeValue(value)]);
   }
 
   async getObject(objectId: number): Promise<unknown> {
@@ -127,6 +141,14 @@ export class SymconClient {
 
   async runScript(scriptId: number): Promise<unknown> {
     return this.call('IPS_RunScript', [scriptId]);
+  }
+
+  /**
+   * Startet ein Skript mit Parametern (asynchron). Das aufgerufene Skript erhält die Keys
+   * von params in $_IPS (z. B. params.VariableID → $_IPS['VariableID']).
+   */
+  async runScriptEx(scriptId: number, params: Record<string, unknown>): Promise<unknown> {
+    return this.call('IPS_RunScriptEx', [scriptId, params]);
   }
 
   async getObjectIdByName(name: string, parentId: number = 0): Promise<number> {
@@ -218,6 +240,43 @@ export class SymconClient {
 
   async getEvent(eventId: number): Promise<unknown> {
     return this.call('IPS_GetEvent', [eventId]);
+  }
+
+  /** Name des MCP-Control-Skripts für verzögerte Aktionen (Timer). Wird unter MCP Automations/Timer angelegt. */
+  static readonly MCP_DELAYED_ACTION_CONTROL_SCRIPT_NAME = 'MCP Delayed Action Control';
+
+  /**
+   * Erstellt oder liefert die Script-ID des MCP Control-Skripts für verzögerte Aktionen.
+   * Das Skript erwartet per IPS_RunScriptEx: VariableID, Value, DelaySeconds.
+   * Es erzeugt ein einmaliges Skript (sleep → RequestAction → IPS_DeleteScript(self)) und startet es asynchron.
+   */
+  async getOrCreateDelayedActionControlScript(): Promise<number> {
+    const path = ['MCP Automations', 'Timer'];
+    const categoryId = await this.getOrCreateCategoryPath(0, path);
+    try {
+      return await this.getScriptIdByName(SymconClient.MCP_DELAYED_ACTION_CONTROL_SCRIPT_NAME, categoryId);
+    } catch {
+      // Skript existiert nicht → anlegen
+    }
+    const scriptId = await this.createScript(0);
+    const content = `<?php
+// Wird per IPS_RunScriptEx aufgerufen. Parameter: VariableID, Value, DelaySeconds (in \$_IPS).
+\$variableId = isset(\$_IPS['VariableID']) ? (int)\$_IPS['VariableID'] : 0;
+\$value = isset(\$_IPS['Value']) ? \$_IPS['Value'] : false;
+\$delaySeconds = isset(\$_IPS['DelaySeconds']) ? (int)\$_IPS['DelaySeconds'] : 0;
+if (\$variableId <= 0 || \$delaySeconds <= 0) { return; }
+\$valuePhp = is_bool(\$value) ? (\$value ? 'true' : 'false') : (is_numeric(\$value) ? (string)\$value : json_encode(\$value));
+\$sid = IPS_CreateScript(0);
+\$inner = '<?php' . "\\n" . 'sleep(' . \$delaySeconds . ');' . "\\n" . 'RequestAction(' . \$variableId . ', ' . \$valuePhp . ');' . "\\n" . 'IPS_DeleteScript(\$_IPS[\\'SELF\\']);' . "\\n";
+IPS_SetScriptContent(\$sid, \$inner);
+IPS_SetName(\$sid, 'MCP Delayed Action (einmalig)');
+IPS_SetParent(\$sid, IPS_GetParent(\$_IPS['SELF']));
+IPS_RunScript(\$sid);
+`;
+    await this.setScriptContent(scriptId, content);
+    await this.setName(scriptId, SymconClient.MCP_DELAYED_ACTION_CONTROL_SCRIPT_NAME);
+    await this.setParent(scriptId, categoryId);
+    return scriptId;
   }
 
   /**
