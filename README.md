@@ -33,6 +33,20 @@ Ausführlich: [ANLEITUNG_INSTALLATION.md](ANLEITUNG_INSTALLATION.md).
 - `symcon_run_script` – Skript ausführen (scriptId)
 - `symcon_get_object_id_by_name` – Objekt-ID anhand des Namens (name, optional parentId)
 - `symcon_get_variable` – Variablen-Infos (variableId)
+- `symcon_get_variable_by_path` – Variable anhand Pfad (z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand)
+- `symcon_resolve_device` – Nutzer-Phrase in Wissensbasis auflösen (z. B. „Büro Licht“ → variableId)
+- `symcon_knowledge_set` / `symcon_knowledge_get` – Geräte-Zuordnungen speichern/lesen (Sprachsteuerung)
+- `symcon_snapshot_variables` – Snapshot aller Variablenwerte unter einer Wurzel (rootId, maxDepth)
+- `symcon_diff_variables` – Aktuellen Zustand mit Snapshot vergleichen (variableId, oldValue, newValue)
+
+### Fall: Gerät per Vorher/Nachher zuordnen (Snapshot/Diff)
+
+Wenn die KI nicht weiß, welches Gerät gemeint ist (z. B. „Ambiente-Licht im Büro“), kann sie es per Vorher/Nachher-Vergleich ermitteln:
+
+1. **Anweisung an den User (immer klar):** „Schalte das Gerät jetzt **ein oder aus** – egal welche Richtung –, damit ich es zuordnen kann. Sag Bescheid, wenn du fertig bist.“
+2. **Snapshot nur ab relevantem Knoten:** `symcon_snapshot_variables(rootId: raumObjectId)` mit der **Objekt-ID des Raums** (z. B. Büro), **nicht** rootId 0. Sonst sind tausende Variablen (Sensoren, sich ändernde Werte) im Snapshot und verfälschen den Diff. Raums-Objekt-ID z. B. aus bekannter Variable: `symcon_get_object(variableId)` → ParentID hochgehen bis zum Raums-Knoten.
+3. User führt die Aktion aus (ein oder aus).
+4. `symcon_diff_variables(previousSnapshotJson)` mit dem gespeicherten Snapshot aufrufen → geänderte variableId = das gemeinte Gerät; danach `symcon_knowledge_set` zum Lernen nutzen.
 
 Ein MCP-Client (z. B. ein KI-fähiger Editor oder ein eigener KI-Assistent) verbindet sich per Streamable HTTP mit `http://127.0.0.1:<Port>` (POST/GET am gleichen Endpunkt). Der spätere „smarte Helfer“ wird in einem separaten Schritt entwickelt und nutzt diesen MCP-Server.
 
