@@ -225,6 +225,8 @@ Erwartung: JSON-Antwort mit `result` (z. B. Server-Infos), kein „Connection 
    Ohne API-Key: Headers leer lassen.
 4. Speichern – der MCP-Client verbindet sich mit dem Symcon-MCP-Server; in Chats z. B. „Lies Variable 12345“ (mit echten IDs aus Symcon).
 
+**Claude: Erster Überblick + interaktiv reden** – Damit Claude beim ersten Mal „Gib mir ein paar Sekunden, ich schaue mir dein Smart Home an“ sagt und dann einen Überblick holt, siehe **docs/CLAUDE_EINBINDEN.md** (Custom Instructions / Anweisungen zum Kopieren).
+
 ### 4. Optional: Nur localhost (SSH-Tunnel)
 
 Wenn Sie den MCP-Server nur auf localhost der SymBox binden möchten, setzen Sie die Umgebungsvariable **MCP_BIND=127.0.0.1** (z. B. im Symcon-Modul beim Start des Node-Prozesses). Dann ist Zugriff von außen nur per SSH-Tunnel möglich: `ssh -L 4096:127.0.0.1:4096 BENUTZER@192.168.10.12`, danach **http://127.0.0.1:4096** nutzen.
@@ -239,6 +241,21 @@ MCP_PORT=4096 SYMCON_API_URL=http://127.0.0.1:3777/api/ npm run start
 ```
 
 - Dann läuft der MCP-Server auf dem Mac auf Port 4096. **Symcon** muss unter `http://127.0.0.1:3777/api/` erreichbar sein (z. B. Symcon lokal oder Tunnel zur SymBox auf 3777). Tools wie `symcon_get_value` rufen dann diese API auf.
+
+### 6. MCP-Server lokal starten (wenn „Loading Tools“ hängt)
+
+Wenn Cursor sich nicht zur SymBox (z. B. 192.168.10.12:4096) verbinden kann (Firewall, anderes Netz), starten Sie den MCP-Server **auf Ihrem Mac** und verbinden Cursor mit **localhost**:
+
+1. **Im Projektordner** (vom Mac aus):
+   ```bash
+   cd symcon-mcp-server
+   ./start-mcp-local.sh http://192.168.10.12:3777/api/ IHR_API_KEY
+   ```
+   (Ohne API-Key: `./start-mcp-local.sh http://192.168.10.12:3777/api/`.) Lassen Sie das Fenster offen – der Server läuft im Vordergrund.
+
+2. **In Cursor** (mcp.json oder MCP-Einstellungen): Symcon-URL von `http://192.168.10.12:4096` auf **`http://127.0.0.1:4096`** ändern. API-Key-Header unverändert lassen.
+
+3. **Cursor neu starten** – die Tools sollten geladen werden. Der MCP-Server auf dem Mac spricht dann mit der Symcon-API auf der SymBox (Port 3777); Port 4096 muss nur lokal erreichbar sein.
 
 ---
 
@@ -271,7 +288,8 @@ MCP_PORT=4096 SYMCON_API_URL=http://127.0.0.1:3777/api/ npm run start
   Sie haben in Symcon einen API-Key gesetzt. In Claude oder anderem MCP-Client (MCP-Einstellungen) unter Headers eintragen: `Authorization: Bearer IHR_KEY` oder `X-MCP-API-Key: IHR_KEY`. Key muss exakt dem in Symcon entsprechen.
 
 - **„Loading Tools“ bleibt hängen**  
-  (1) Symcon: Instanz „MCP Server“ → **Aktiv** gesetzt, **Änderungen übernehmen** – oben sollte dann **[OK] MCP-Server läuft** stehen (oder „Port in Benutzung“). (2) Erreichbarkeit vom Rechner des MCP-Clients: `curl -s -o /dev/null -w "%{http_code}" http://<SymBox-IP>:4096` – sollte 200 oder 405 liefern, nicht 000 (Firewall/Netzwerk prüfen). (3) API-Key im MCP-Client (Header `Authorization: Bearer <Key>`) muss exakt dem in Symcon entsprechen. (4) MCP-Client neu starten.
+  (1) Symcon: Instanz „MCP Server“ → **Aktiv** gesetzt, **Änderungen übernehmen** – oben sollte dann **[OK] MCP-Server läuft** stehen (oder „Port in Benutzung“). (2) Erreichbarkeit vom Rechner des MCP-Clients: `curl -s -o /dev/null -w "%{http_code}" http://<SymBox-IP>:4096` – sollte 200 oder 405 liefern, nicht 000 (Firewall/Netzwerk prüfen). (3) API-Key im MCP-Client (Header `Authorization: Bearer <Key>`) muss exakt dem in Symcon entsprechen. (4) MCP-Client neu starten.  
+  **Workaround:** Wenn die SymBox von Ihrem Mac aus nicht erreichbar ist, können Sie den MCP-Server **lokal auf dem Mac** starten und Cursor mit **http://127.0.0.1:4096** verbinden – siehe Abschnitt „MCP-Server lokal starten (Loading Tools)“ unten.
 
 ---
 
