@@ -4,26 +4,74 @@ So nutzt du dein Symcon-Smart-Home **mit Claude** (Anthropic): MCP-Server verbin
 
 ---
 
+## „Ziehe .MCPB- oder .DXT-Dateien hier her“ – was bedeutet das?
+
+In Claude Desktop siehst du unter **Einstellungen → Erweiterungen** oft: **„Ziehe .MCPB- oder .DXT-Dateien hier her, um sie zu installieren.“**
+
+- **.mcpb / .dxt** = vorgepackte Erweiterungen (ein Klick, alles drin). Unser Symcon-Server ist aber ein **Streamable-HTTP-Server unter einer URL** (z. B. http://127.0.0.1:4096), **keine** .mcpb-Datei.
+
+**Zwei Wege, den Symcon-Server trotzdem in Claude zu nutzen:**
+
+---
+
 ## 1. MCP-Server in Claude verbinden
+
+### Variante A: Config-Datei (empfohlen, wenn nur „.mcpb ziehen“ sichtbar ist)
+
+Claude Desktop kann MCP-Server auch über eine **Konfigurationsdatei** laden. Dafür brauchst du einen kleinen **Adapter**, der zwischen Claude (stdio) und unserem Server (Streamable HTTP per URL) vermittelt.
 
 1. **Symcon MCP-Server starten** (lokal auf dem Mac):
    ```bash
    cd symcon-mcp-server
    ./start-mcp-local.sh
    ```
-   Passwort eingeben, wenn gefragt. Server läuft auf **http://127.0.0.1:4096**.
+   Passwort eingeben. Server läuft auf **http://127.0.0.1:4096**.
 
-2. **In Claude:** Einstellungen öffnen → **MCP** (oder „Tools“ / „Integrations“) → **Server hinzufügen**.
+2. **Config-Datei bearbeiten:**
+   - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
-3. **Streamable HTTP** wählen, URL eintragen:
-   - **http://127.0.0.1:4096** (wenn der Server lokal auf dem Mac läuft)
-   - oder **http://&lt;SymBox-IP&gt;:4096**, wenn der Server auf der SymBox läuft.
+   Falls die Datei noch nicht existiert: anlegen. Inhalt (oder als `mcpServers`-Block zu bestehendem Config hinzufügen):
 
-4. **Optional:** Wenn du einen MCP-API-Key gesetzt hast, unter Headers eintragen:
-   - Name: `Authorization`, Wert: `Bearer DEIN_API_KEY`
-   - oder Name: `X-MCP-API-Key`, Wert: `DEIN_API_KEY`
+   ```json
+   {
+     "mcpServers": {
+       "symcon": {
+         "command": "npx",
+         "args": ["-y", "@pyroprompts/mcp-stdio-to-streamable-http-adapter"],
+         "env": {
+           "URI": "http://127.0.0.1:4096",
+           "MCP_NAME": "symcon"
+         }
+       }
+     }
+   }
+   ```
 
-5. Speichern – Claude lädt die Symcon-Tools (symcon_resolve_device, symcon_set_value, symcon_knowledge_get, symcon_get_object_tree, …).
+   Bei MCP-API-Key (falls du einen gesetzt hast):
+   ```json
+   "env": {
+     "URI": "http://127.0.0.1:4096",
+     "MCP_NAME": "symcon",
+     "BEARER_TOKEN": "DEIN_API_KEY"
+   }
+   ```
+
+3. **Claude Desktop vollständig neu starten** (nicht nur Fenster schließen). Danach sollte der Symcon-Server als MCP verfügbar sein.
+
+Der Adapter (`@pyroprompts/mcp-stdio-to-streamable-http-adapter`) läuft lokal und leitet alle Aufrufe an deinen Symcon-Server (die URL) weiter. **npx** lädt ihn bei Bedarf automatisch herunter.
+
+---
+
+### Variante B: In Claude eine „URL“ oder „Connector“-Option
+
+Falls in deiner Claude-Version unter **Einstellungen** ein Bereich **„Connectors“**, **„MCP“** oder **„Server hinzufügen“** existiert und dort eine **URL** (Streamable HTTP) eingegeben werden kann:
+
+1. Symcon-Server starten (siehe oben).
+2. In Claude die Symcon-URL eintragen: **http://127.0.0.1:4096** (oder SymBox-IP:4096).
+3. Optional: Header `Authorization: Bearer DEIN_API_KEY` setzen, falls du einen MCP-API-Key nutzt.
+
+Wenn es bei dir **nur** „.mcpb ziehen“ gibt, **Variante A** (Config-Datei) verwenden.
 
 ---
 
