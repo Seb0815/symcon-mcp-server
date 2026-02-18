@@ -335,11 +335,47 @@ async function main(): Promise<void> {
     ];
     const origin = req.headers.origin;
     if (origin && !allowedOrigins.includes(origin) && HOST === '127.0.0.1') {
+      debugLog('MCP-REQ', `[FAIL] Origin not allowed: ${origin}`);
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Origin not allowed' }));
       return;
     }
     const body = req.method === 'POST' ? await readBody(req) : undefined;
+
+    // Log parsed request body (MCP method name, params)
+    if (ENABLE_DEBUG && body && typeof body === 'object') {
+      const rpcBody = body as Record<string, unknown>;
+      debugLog('MCP-REQ', `JSON-RPC method: ${String(rpcBody.method ?? '(none)')}`);
+      debugLog('MCP-REQ', `JSON-RPC id: ${String(rpcBody.id ?? '(none)')}`);
+      const paramsStr = JSON.stringify(rpcBody.params);
+      debugLog('MCP-REQ', `JSON-RPC params: ${paramsStr && paramsStr.length > 300 ? paramsStr.substring(0, 300) + '...' : paramsStr}`);
+    }
+
+    // Intercept response to log status code and body
+    if (ENABLE_DEBUG) {
+      const origWriteHead = res.writeHead.bind(res);
+      const origEnd = res.end.bind(res);
+      (res as any).writeHead = (...args: any[]) => {
+        debugLog('MCP-RES', `--- Response for ${req.method} ${req.url} ---`);
+        debugLog('MCP-RES', `Status: ${args[0]}`);
+        if (args[1] && typeof args[1] === 'object' && !Array.isArray(args[1])) {
+          debugLog('MCP-RES', `Headers: ${JSON.stringify(args[1])}`);
+        }
+        return origWriteHead(...args);
+      };
+      (res as any).end = (...args: any[]) => {
+        const chunk = args[0];
+        if (chunk) {
+          const bodyStr = typeof chunk === 'string' ? chunk : (Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk));
+          debugLog('MCP-RES', `Body: ${bodyStr.length > 500 ? bodyStr.substring(0, 500) + '...' : bodyStr}`);
+        } else {
+          debugLog('MCP-RES', `Body: (empty/stream)`);
+        }
+        debugLog('MCP-RES', `----------------------------------------`);
+        return origEnd(...args);
+      };
+    }
+
     await httpTransport.handleRequest(req, res, body);
   };
 
