@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+# ============================================================================
+# DEPRECATED: Dieses Script ist veraltet!
+# ============================================================================
+# Ab Version 2.0 läuft der MCP Server in Docker.
+# Bitte verwenden Sie stattdessen:
+#   1. ./scripts/setup-env.sh
+#   2. ./build-docker.sh
+#   3. ./start-docker.sh
+#
+# Siehe: docs/DOCKER_DEPLOYMENT.md
+# Migration: ./scripts/migrate-from-local.sh
+# ============================================================================
+#
 # MCP-Server lokal auf dem Mac starten (Workaround wenn SymBox:4096 nicht erreichbar).
 # Symcon-API bleibt auf der SymBox (URL in local-config.env, z. B. http://<SymBox-IP>:3777/api/).
 #
@@ -11,6 +24,29 @@
 #   ./start-mcp-local.sh [SYMCON_API_URL] [MCP_API_KEY]   # optional: URL/Key überschreiben
 
 set -e
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════════════╗"
+echo "║  ⚠️  DEPRECATED: Lokale Node.js-Installation                      ║"
+echo "╠════════════════════════════════════════════════════════════════════╣"
+echo "║  Dieses Script ist veraltet. Bitte verwenden Sie Docker:          ║"
+echo "║                                                                    ║"
+echo "║  1. ./scripts/setup-env.sh                                         ║"
+echo "║  2. ./build-docker.sh                                              ║"
+echo "║  3. ./start-docker.sh                                              ║"
+echo "║                                                                    ║"
+echo "║  Migration: ./scripts/migrate-from-local.sh                        ║"
+echo "║  Docs: docs/DOCKER_DEPLOYMENT.md                                   ║"
+echo "╚════════════════════════════════════════════════════════════════════╝"
+echo ""
+read -p "Trotzdem fortfahren (alte Methode)? [y/N] " -n 1 -r
+echo ""
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Abgebrochen. Bitte nutzen Sie Docker!"
+    exit 0
+fi
+echo ""
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MCP_DIR="$SCRIPT_DIR/libs/mcp-server"
 

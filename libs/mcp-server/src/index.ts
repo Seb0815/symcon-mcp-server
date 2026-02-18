@@ -9,10 +9,25 @@ import { createServer as createHttpsServer } from 'node:https';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { SymconClient } from './symcon/SymconClient.js';
 import { createToolHandlers } from './tools/index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Read version from package.json
+let PKG_VERSION = '2.0.0';
+try {
+  const pkgPath = join(__dirname, '..', 'package.json');
+  const pkgJson = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  PKG_VERSION = pkgJson.version || '2.0.0';
+} catch {
+  // Fallback if package.json not found
+}
 
 const PORT = parseInt(process.env.MCP_PORT ?? '4096', 10);
 const SYMCON_API_URL = process.env.SYMCON_API_URL ?? 'http://127.0.0.1:3777/api/';
@@ -67,7 +82,78 @@ function readBody(req: import('node:http').IncomingMessage): Promise<unknown> {
   });
 }
 
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+const RATE_LIMIT = parseInt(process.env.MCP_RATE_LIMIT ?? '100', 10);
+const RATE_WINDOW_MS = 60 * 1000; // 1 minute
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+const rateLimitMap = new Map<string, RateLimitEntry>();
+
+// Cleanup old entries every 60 seconds
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitMap.entries()) {
+    if (entry.resetAt < now) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 60000);
+
+function checkRateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (!entry || entry.resetAt < now) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return { allowed: true };
+  }
+
+  if (entry.count >= RATE_LIMIT) {
+    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+
+  entry.count++;
+  return { allowed: true };
+}
+
 async function main(): Promise<void> {
+  // SECURITY: API key is now mandatory - server will not start without it
+  if (!MCP_AUTH_TOKEN || MCP_AUTH_TOKEN.trim().length === 0) {
+    process.stderr.write(
+      '\n' +
+      '╔═══════════════════════════════════════════════════════════════════════╗\n' +
+      '║  FATAL ERROR: MCP_AUTH_TOKEN must be set                             ║\n' +
+      '║                                                                       ║\n' +
+      '║  The MCP server cannot start without authentication configured.      ║\n' +
+      '║  This is a security requirement.                                     ║\n' +
+      '║                                                                       ║\n' +
+      '║  Please set MCP_AUTH_TOKEN in your .env file.                        ║\n' +
+      '║                                                                       ║\n' +
+      '║  Generate a secure token:                                            ║\n' +
+      '║    openssl rand -hex 32                                              ║\n' +
+      '║                                                                       ║\n' +
+      '║  Or use the setup script:                                            ║\n' +
+      '║    ./scripts/setup-env.sh                                            ║\n' +
+      '╚═══════════════════════════════════════════════════════════════════════╝\n' +
+      '\n'
+    );
+    process.exit(1);
+  }
+
+  if (MCP_AUTH_TOKEN.length < 16) {
+    process.stderr.write(
+      'WARNING: MCP_AUTH_TOKEN is too short (< 16 characters). ' +
+      'For security, use at least 32 characters.\n'
+    );
+  }
+
   const symconAuth =
     SYMCON_API_USER && SYMCON_API_PASSWORD
       ? { type: 'basic' as const, username: SYMCON_API_USER, password: SYMCON_API_PASSWORD }
@@ -76,7 +162,7 @@ async function main(): Promise<void> {
   const mcp = new McpServer(
     {
       name: 'symcon-mcp-server',
-      version: '1.0.0',
+      version: PKG_VERSION,
     },
     {
       capabilities: {},
@@ -101,6 +187,39 @@ async function main(): Promise<void> {
   await mcp.connect(transport);
 
   const requestHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // Health check endpoint (always accessible, no auth required)
+    if (req.method === 'GET' && req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        version: PKG_VERSION,
+        authenticated: true,
+        symconApi: SYMCON_API_URL,
+        timestamp: new Date().toISOString()
+      }));
+      return;
+    }
+
+    // Rate limiting (check before auth to prevent brute force)
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() 
+                     || req.socket.remoteAddress 
+                     || 'unknown';
+    const rateCheck = checkRateLimit(clientIp);
+    if (!rateCheck.allowed) {
+      res.writeHead(429, {
+        'Content-Type': 'application/json',
+        'Retry-After': String(rateCheck.retryAfter),
+        'X-RateLimit-Limit': String(RATE_LIMIT),
+        'X-RateLimit-Reset': String(rateCheck.retryAfter)
+      });
+      res.end(JSON.stringify({
+        error: 'Too Many Requests',
+        message: `Rate limit exceeded. Maximum ${RATE_LIMIT} requests per minute.`,
+        retryAfter: rateCheck.retryAfter
+      }));
+      return;
+    }
+
     if (req.method === 'POST' && !isAuthorized(req)) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Unauthorized', message: 'Missing or invalid API key' }));
@@ -143,10 +262,17 @@ async function main(): Promise<void> {
   const scheme = USE_HTTPS ? 'https' : 'http';
   server.listen(PORT, HOST, () => {
     process.stderr.write(
-      `Symcon MCP Server listening on ${scheme}://${HOST === '0.0.0.0' ? '0.0.0.0' : HOST}:${PORT} (${HOST === '0.0.0.0' ? 'use ' + scheme + '://<SymBox-IP>:' + PORT : ''})\n`
+      '\n' +
+      '╔═══════════════════════════════════════════════════════════════════════╗\n' +
+      `║  Symcon MCP Server v${PKG_VERSION.padEnd(46)} ║\n` +
+      '╠═══════════════════════════════════════════════════════════════════════╣\n' +
+      `║  Listening:   ${(scheme + '://' + HOST + ':' + PORT).padEnd(52)} ║\n` +
+      `║  Symcon API:  ${SYMCON_API_URL.padEnd(52)} ║\n` +
+      `║  Auth:        API key required (✓)${' '.padEnd(30)} ║\n` +
+      `║  Health:      ${(scheme + '://' + HOST + ':' + PORT + '/health').padEnd(52)} ║\n` +
+      '╚═══════════════════════════════════════════════════════════════════════╝\n' +
+      '\n'
     );
-    process.stderr.write(`Symcon API: ${SYMCON_API_URL}\n`);
-    if (MCP_AUTH_TOKEN) process.stderr.write('Auth: API key required (Authorization: Bearer or X-MCP-API-Key)\n');
   });
 }
 

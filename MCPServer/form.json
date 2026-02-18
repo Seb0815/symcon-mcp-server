@@ -2,41 +2,127 @@
   "elements": [
     {
       "type": "Label",
-      "caption": "TCP-Port, auf dem der MCP-Server lauscht. MCP-Clients (z. B. Claude, andere KI-Agenten) verbinden sich zu diesem Port. Beispiel: 4096."
-    },
-    {
-      "type": "NumberSpinner",
-      "name": "Port",
-      "caption": "Port",
-      "minimum": 1024,
-      "maximum": 65535
+      "caption": "──────────────────────────────────────────────────────────────────────"
     },
     {
       "type": "Label",
-      "caption": "Basis-URL der Symcon JSON-RPC-API. Läuft Symcon auf derselben Box, z. B.: http://127.0.0.1:3777/api/"
-    },
-    {
-      "type": "ValidationTextBox",
-      "name": "SymconApiUrl",
-      "caption": "Symcon-API-URL"
+      "caption": "🐳 Docker MCP Server Konfiguration",
+      "fontSize": 16,
+      "bold": true
     },
     {
       "type": "Label",
-      "caption": "Beim ersten \"Änderungen übernehmen\" wird automatisch ein API-Key erzeugt und hier angezeigt. Key kopieren und in Claude oder anderen MCP-Client eintragen (Header \"Authorization: Bearer <Key>\" oder \"X-MCP-API-Key: <Key>\"). Leer lassen = keine Authentifizierung (unsicher im Netz)."
+      "caption": "Der MCP Server läuft jetzt in einem Docker-Container. Dieses Modul verbindet sich per HTTP zum Server."
+    },
+    {
+      "type": "Label",
+      "caption": "──────────────────────────────────────────────────────────────────────"
+    },
+    {
+      "type": "Label",
+      "caption": ""
+    },
+    {
+      "type": "Label",
+      "caption": "MCP Server URL",
+      "fontSize": 14,
+      "bold": true
+    },
+    {
+      "type": "Label",
+      "caption": "URL des Docker-MCP-Servers (inkl. Port). Beispiele: http://localhost:4096 oder http://192.168.1.100:4096"
     },
     {
       "type": "ValidationTextBox",
+      "name": "MCPServerURL",
+      "caption": "MCP Server URL"
+    },
+    {
+      "type": "Label",
+      "caption": ""
+    },
+    {
+      "type": "Label",
+      "caption": "API-Schlüssel",
+      "fontSize": 14,
+      "bold": true
+    },
+    {
+      "type": "Label",
+      "caption": "Der API-Schlüssel muss mit dem MCP_AUTH_TOKEN in der Docker .env-Datei übereinstimmen. Generieren Sie einen mit: openssl rand -hex 32"
+    },
+    {
+      "type": "PasswordTextBox",
       "name": "ApiKey",
-      "caption": "API-Key (optional)"
+      "caption": "API-Key"
     },
     {
       "type": "Label",
-      "caption": "Wenn aktiviert, startet der MCP-Server beim Klick auf \"Änderungen übernehmen\". Deaktiviert oder erneutes Übernehmen beendet ihn."
+      "caption": "WICHTIG: Dieser Key muss auch in der .env-Datei des Docker-Containers (MCP_AUTH_TOKEN) gesetzt sein!"
+    },
+    {
+      "type": "Label",
+      "caption": ""
+    },
+    {
+      "type": "Label",
+      "caption": "Modul aktivieren",
+      "fontSize": 14,
+      "bold": true
     },
     {
       "type": "CheckBox",
       "name": "Active",
       "caption": "Aktiv"
+    },
+    {
+      "type": "Label",
+      "caption": "Wenn aktiviert, prüft das Modul regelmäßig (alle 60 Sekunden) die Verbindung zum MCP Server."
+    },
+    {
+      "type": "Label",
+      "caption": ""
+    },
+    {
+      "type": "Label",
+      "caption": "──────────────────────────────────────────────────────────────────────"
+    },
+    {
+      "type": "Label",
+      "caption": "ℹ️ Setup-Hinweise",
+      "fontSize": 14,
+      "bold": true
+    },
+    {
+      "type": "Label",
+      "caption": "1. Docker-Container starten: ./start-docker.sh"
+    },
+    {
+      "type": "Label",
+      "caption": "2. API-Key aus .env-Datei kopieren (MCP_AUTH_TOKEN=...)"
+    },
+    {
+      "type": "Label",
+      "caption": "3. Hier eintragen und 'Änderungen übernehmen' klicken"
+    },
+    {
+      "type": "Label",
+      "caption": "4. Status-Variable zeigt Verbindung (grün = OK)"
+    },
+    {
+      "type": "Label",
+      "caption": ""
+    },
+    {
+      "type": "Label",
+      "caption": "Dokumentation: docs/DOCKER_DEPLOYMENT.md"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Button",
+      "caption": "Verbindung testen",
+      "onClick": "MCPServer_TestConnection($id);"
     }
   ]
 }

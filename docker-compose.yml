@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: ./libs/mcp-server
+      dockerfile: Dockerfile
+    container_name: symcon-mcp-server
+    image: symcon-mcp-server:latest
+    restart: unless-stopped
+    
+    ports:
+      - "${MCP_PORT:-4096}:4096"
+    
+    # Environment variables from .env file
+    env_file:
+      - .env
+    
+    # Persistent volume for Knowledge and Automation Store
+    volumes:
+      - ./libs/mcp-server/data:/app/data
+      # Optional: If using custom TLS certificates
+      # - ./libs/mcp-server/certs:/app/certs:ro
+    
+    # Health check configuration
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:4096/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Network configuration
+    # Use 'host' mode if Symcon is on localhost
+    # network_mode: "host"
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Optional: For later migration to Docker Secrets (more secure)
+# Uncomment and configure when ready:
+#
+# secrets:
+#   mcp_auth_token:
+#     file: ./secrets/mcp_auth_token.txt
+#   symcon_password:
+#     file: ./secrets/symcon_password.txt
+#
+# services:
+#   mcp-server:
+#     secrets:
+#       - mcp_auth_token
+#       - symcon_password
+#     environment:
+#       # Remove from .env when using secrets:
+#       # MCP_AUTH_TOKEN: # use secret instead
+#       # SYMCON_API_PASSWORD: # use secret instead

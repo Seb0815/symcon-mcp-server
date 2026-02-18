@@ -1,14 +1,17 @@
 {
+  "MCP Server Connection": "MCP Server Verbindung",
   "MCP Server": {
-    "Port": "Port",
-    "PortBeschreibung": "TCP-Port, auf dem der MCP-Server lauscht. MCP-Clients (z. B. Claude, andere KI-Agenten) verbinden sich zu diesem Port. Beispiel: 4096.",
-    "SymconApiUrl": "Symcon-API-URL",
-    "SymconApiUrlBeschreibung": "Basis-URL der Symcon JSON-RPC-API. Läuft Symcon auf derselben Box, z. B.: http://127.0.0.1:3777/api/",
+    "MCPServerURL": "MCP Server URL",
+    "MCPServerURLDescription": "URL des Docker-MCP-Servers (inkl. Port). Beispiele: http://localhost:4096 oder http://192.168.1.100:4096",
+    "ApiKey": "API-Schlüssel",
+    "ApiKeyDescription": "Der API-Schlüssel muss mit dem MCP_AUTH_TOKEN in der Docker .env-Datei übereinstimmen.",
     "Active": "Aktiv",
-    "ActiveBeschreibung": "Wenn aktiviert, startet der MCP-Server beim Klick auf „Änderungen übernehmen“. Deaktiviert oder erneutes Übernehmen beendet ihn.",
-    "ProcessStarted": "MCP-Server gestartet",
-    "ProcessStopped": "MCP-Server beendet",
-    "InvalidPort": "Ungültiger Port",
-    "InvalidApiUrl": "Ungültige API-URL"
+    "ActiveDescription": "Wenn aktiviert, prüft das Modul regelmäßig (alle 60 Sekunden) die Verbindung zum MCP Server.",
+    "Connected": "Verbunden mit MCP Server",
+    "Disconnected": "Nicht verbunden. Docker-Container läuft? URL korrekt?",
+    "TestConnection": "Verbindung testen",
+    "ConnectionSuccessful": "Verbindung erfolgreich",
+    "ConnectionFailed": "Verbindung fehlgeschlagen. Prüfen Sie die MCP Server URL und ob der Docker-Container läuft.",
+    "InvalidURL": "Ungültige MCP Server URL"
   }
 }

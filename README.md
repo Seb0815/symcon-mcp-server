@@ -1,83 +1,354 @@
-# Symcon MCP Server – Bibliothek
+# Symcon MCP Server – Docker-basierte Smart Home Integration
 
-Symcon-Bibliothek mit dem Modul **MCP Server**: Ein PHP-Wrapper startet einen Node.js MCP-Server, der die IP-Symcon JSON-RPC API als MCP-Tools (GetValue, SetValue, RequestAction, Objekte, Skripte) bereitstellt. So können KI-Clients (z. B. ein KI-fähiger Editor oder ein späterer „smarte Helfer“) per Streamable HTTP auf Ihr Symcon-Smart-Home zugreifen.
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](CHANGELOG.md)
+[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](docs/DOCKER_DEPLOYMENT.md)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## Voraussetzungen
+**MCP-Server für IP-Symcon**: Stellt die Symcon JSON-RPC API als MCP-Tools bereit, sodass KI-Clients (Claude, Cursor, eigene Assistenten) Ihr Smart Home steuern können.
 
-- **IP-Symcon** ab Version 5.0 (empfohlen 8.1+ für IPSModuleStrict).
-- **Node.js** 20+ (LTS) auf demselben Rechner wie Symcon.
-- Symcon WebServer mit JSON-RPC API (Standard: Port 3777, Pfad `/api/`).
+**🐳 Neu in v2.0:** Docker-basiertes Deployment – keine Node.js-Installation auf SymBox mehr erforderlich!
 
-## Installation
+---
 
-1. Bibliothek über **Module Control** hinzufügen (Repository-URL oder lokalen Pfad zu `symcon-mcp-server` angeben). Das Repo enthält den vorgebauten MCP-Server (`libs/mcp-server/dist/`) – bei Git-Installation ist kein eigener Build nötig.
-2. Unter „Instanz hinzufügen“ das Modul **MCP Server** auswählen.
-3. **Port** (z. B. 4096) und **Symcon API URL** (z. B. `http://127.0.0.1:3777/api/`) konfigurieren, **Aktiv** setzen, Änderungen übernehmen.
+## 🏗️ Architektur
 
-Ausführlich: [ANLEITUNG_INSTALLATION.md](ANLEITUNG_INSTALLATION.md).
+```
+┌─────────────────────────────────────┐
+│  KI-Client (Claude, Cursor, etc.)  │
+│  → Steuert Smart Home per Sprache   │
+└──────────────┬──────────────────────┘
+               │ HTTP + Bearer Token
+               ↓
+┌─────────────────────────────────────┐
+│  🐳 Docker Container (PC/Mac/VPS)   │
+│  ┌───────────────────────────────┐  │
+│  │  MCP Server (Node.js)         │  │
+│  │  • Rate Limiting              │  │
+│  │  • Audit Logging              │  │
+│  │  • Health Checks              │  │
+│  └─────────┬─────────────────────┘  │
+└────────────┼────────────────────────┘
+             │ JSON-RPC (HTTP)
+             ↓
+┌─────────────────────────────────────┐
+│  📦 Symcon Server (SymBox/PC)       │
+│  ┌───────────────────────────────┐  │
+│  │  IP-Symcon                    │  │
+│  │  • JSON-RPC API (Port 3777)   │  │
+│  │  • PHP-Modul: MCP Client      │  │
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
+             │
+             ↓
+┌─────────────────────────────────────┐
+│  🏠 Smart Home Geräte               │
+│  (Hue, Homematic, Shelly, ...)     │
+└─────────────────────────────────────┘
+```
 
-**Sprachassistent bauen:** Wenn du sprechen willst und der Assistent mit Sprache antwortet und dein Haus steuert: [docs/SPRACHASSISTENT_BAUEN.md](docs/SPRACHASSISTENT_BAUEN.md) – Optionen mit ChatGPT/OpenAI Realtime API, Whisper+TTS oder externen Voice-Plattformen.
+### Komponenten
 
-**Server im Internet + Smart Home im eigenen Netz:** Wenn dein Dienst auf einem Server im Internet läuft und das Smart Home im Heimnetz nicht von außen erreichbar ist: [docs/ARCHITEKTUR_SERVER_IM_INTERNET.md](docs/ARCHITEKTUR_SERVER_IM_INTERNET.md) – Outbound-Verbindung vom Smart Home zum Server, Brücke im Heimnetz, Web-App mit Mikrofon und optional lokaler Auswertung, dann Whisper + ChatGPT auf dem Server.
+| Komponente | Läuft auf | Funktion |
+|------------|-----------|----------|
+| **MCP Server** | Docker (PC/Mac/VPS) | Übersetzt KI-Anfragen in Symcon-Befehle |
+| **PHP-Modul** | SymBox/Symcon | Überwacht Docker-Verbindung, zeigt Status |
+| **Symcon API** | SymBox/Symcon | Steuert eigentliche Smart Home Geräte |
 
-## Ausführung: Symcon vs. lokal
+---
 
-**Auf der SymBox / in Symcon selbst:** Der MCP-Server läuft **aktuell noch nicht** auf der SymBox (IP-Symcon als Instanz). Die Ausführung direkt in IP-Symcon hat noch Probleme (z. B. Umgebung, Node-Ausführung). Wir arbeiten daran.
+## 🚀 Quickstart (5 Minuten)
 
-**Lokal (empfohlen):** Der Server läuft zuverlässig, wenn Sie ihn auf Ihrem Rechner starten und dabei die Symcon-API (lokal oder im Netz) ansprechen. Dafür **muss** die **`local-config.env`** angepasst werden:
+### Voraussetzungen
+- **Docker** + **Docker Compose** ([Installation](https://docs.docker.com/get-docker/))
+- **IP-Symcon** ab Version 5.0 (läuft auf SymBox/PC)
+- Netzwerk-Zugriff: Docker-Host ↔ Symcon-Server
 
-1. Im Projektordner `symcon-mcp-server`: **`local-config.env`** anlegen – z. B. `cp local-config.env.example local-config.env` – und anpassen:
-   - **`SYMCON_API_URL`**: Adresse der Symcon-API (z. B. `http://127.0.0.1:3777/api/` oder `http://<SymBox-IP>:3777/api/`).
-   - **`SYMCON_API_USER`** (optional): Lizenz-E-Mail für Symcon Remote Access; Passwort wird beim Start abgefragt.
-   - **`MCP_AUTH_TOKEN`** (optional): MCP-API-Key.
-2. Server starten (Node.js 20+ vorausgesetzt):
-   - **Ohne HTTPS (z. B. für Cursor):** `MCP_HTTP=1 ./start-mcp-local.sh` – der Server läuft dann auf **http://127.0.0.1:4096**; Cursor akzeptiert in der Regel keine self-signed Zertifikate, daher HTTP nutzen.
-   - Mit HTTPS (falls Zertifikate in `certs/` liegen): `./start-mcp-local.sh`.
-   Optional: URL und API-Key als Argumente übergeben.
-3. In Cursor (oder anderem MCP-Client) die MCP-URL auf **http://127.0.0.1:4096** stellen (bei `MCP_HTTP=1`) und den Client ggf. neu starten.
+### Installation
 
-Die Symcon-API bleibt auf dem Gerät, auf dem Symcon läuft (SymBox/PC); der MCP-Server verbindet sich von Ihrem Rechner aus dorthin.
+#### 1. Docker-Host (PC/Mac) einrichten
 
-## Konfiguration
+```bash
+# Repository klonen
+git clone https://github.com/beeXperts-Niko/symcon-mcp-server.git
+cd symcon-mcp-server
 
-- **Port:** TCP-Port für den MCP-Server (Streamable HTTP).
-- **Symcon API URL:** Basis-URL der Symcon JSON-RPC API (z. B. `http://127.0.0.1:3777/api/`).
-- **API-Key (optional):** Wenn gesetzt, müssen Clients den Key mitsenden (Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>`). Ohne Key ist der MCP-Server für jeden im Netzwerk erreichbar – für Produktion nur mit Key empfohlen.
-- **Aktiv:** MCP-Server starten/beenden mit den Instanz-Änderungen.
+# Konfiguration erstellen (interaktiv)
+./scripts/setup-env.sh
 
-## MCP-Tools
+# Docker-Image bauen
+./build-docker.sh
 
-- `symcon_get_value` – Variable lesen (variableId)
-- `symcon_set_value` – Variable schreiben (variableId, value)
-- `symcon_request_action` – Aktion auslösen (variableId, optional value)
-- `symcon_get_object` – Objekt-Infos (objectId)
-- `symcon_get_children` – Kinder-IDs (objectId)
-- `symcon_run_script` – Skript ausführen (scriptId)
-- `symcon_get_object_id_by_name` – Objekt-ID anhand des Namens (name, optional parentId)
-- `symcon_get_variable` – Variablen-Infos (variableId)
-- `symcon_get_variable_by_path` – Variable anhand Pfad (z. B. Räume/Erdgeschoss/Büro/EG-BU-LI-1/Zustand)
-- `symcon_resolve_device` – Nutzer-Phrase in Wissensbasis auflösen (z. B. „Büro Licht“ → variableId)
-- `symcon_knowledge_set` / `symcon_knowledge_get` – Geräte-Zuordnungen speichern/lesen (Sprachsteuerung)
-- `symcon_snapshot_variables` – Snapshot aller Variablenwerte unter einer Wurzel (rootId, maxDepth)
-- `symcon_diff_variables` – Aktuellen Zustand mit Snapshot vergleichen (variableId, oldValue, newValue)
-- **Automationen:** `symcon_automation_get_or_create_folder`, `symcon_schedule_once` (einmaliger Timer; Fallback: festes Control-Skript „MCP Delayed Action Control“ mit Queue **„MCP Timer Queue“** + Dispatcher-Event (jede Sekunde), Enqueue per RunScriptEx/RunScriptText), `symcon_script_create` / `symcon_script_set_content` / `symcon_script_delete`, `symcon_event_create_cyclic` / … – Skripte und zeitgesteuerte Events unter MCP Automations/Thema/Raum. Siehe [docs/AUTOMATIONEN.md](docs/AUTOMATIONEN.md).
+# Container starten
+./start-docker.sh
+```
 
-### Fall: Gerät per Vorher/Nachher zuordnen (Snapshot/Diff)
+✅ Server läuft jetzt auf `http://localhost:4096`
 
-Wenn die KI nicht weiß, welches Gerät gemeint ist (z. B. „Ambiente-Licht im Büro“), kann sie es per Vorher/Nachher-Vergleich ermitteln:
+#### 2. Symcon PHP-Modul installieren (SymBox)
 
-1. **Anweisung an den User (immer klar):** „Schalte das Gerät jetzt **ein oder aus** – egal welche Richtung –, damit ich es zuordnen kann. Sag Bescheid, wenn du fertig bist.“
-2. **Snapshot nur ab relevantem Knoten:** `symcon_snapshot_variables(rootId: raumObjectId)` mit der **Objekt-ID des Raums** (z. B. Büro), **nicht** rootId 0. Sonst sind tausende Variablen (Sensoren, sich ändernde Werte) im Snapshot und verfälschen den Diff. Raums-Objekt-ID z. B. aus bekannter Variable: `symcon_get_object(variableId)` → ParentID hochgehen bis zum Raums-Knoten.
-3. User führt die Aktion aus (ein oder aus).
-4. `symcon_diff_variables(previousSnapshotJson)` mit dem gespeicherten Snapshot aufrufen → geänderte variableId = das gemeinte Gerät; danach `symcon_knowledge_set` zum Lernen nutzen.
+**Option A: Über Symcon Module Control (empfohlen)**
+1. Symcon-Weboberfläche → **Module Control**
+2. Repository hinzufügen: `https://github.com/beeXperts-Niko/symcon-mcp-server`
+3. Instanz erstellen: **MCP Server**
 
-Ein MCP-Client (z. B. ein KI-fähiger Editor oder ein eigener KI-Assistent) verbindet sich per Streamable HTTP mit `http://127.0.0.1:<Port>` (POST/GET am gleichen Endpunkt). Der spätere „smarte Helfer“ wird in einem separaten Schritt entwickelt und nutzt diesen MCP-Server.
+**Option B: Manuelles Deployment**
+```bash
+# PHP-Modul zur SymBox kopieren
+./deploy-to-symbox.sh root@<SymBox-IP>
+```
 
-**Entwicklung:** Wenn Sie den TypeScript-Code in `libs/mcp-server/src/` ändern: `npm run build` in `libs/mcp-server/` ausführen und die aktualisierten Dateien in `libs/mcp-server/dist/` mit ins Repo committen, damit Git-Installationen die neueste Version bekommen.
+#### 3. Symcon-Modul konfigurieren
 
-## Dokumentation
+1. Symcon-Weboberfläche → **MCP Server**-Modul öffnen
+2. Konfiguration:
+   - **MCP Server URL:** `http://<DOCKER-HOST-IP>:4096`
+     - Gleiche Maschine: `http://localhost:4096`
+     - Remote: `http://192.168.1.50:4096`
+   - **API-Key:** Aus `.env` kopieren (`MCP_AUTH_TOKEN=...`)
+   - **Aktiv:** ✓ Häkchen setzen
+3. **Änderungen übernehmen** klicken
 
-- [docs/STEUERUNG_HINWEISE.md](docs/STEUERUNG_HINWEISE.md) – Steuerungshinweise für KI und MCP-Clients (z. B. Hue: RequestAction für Ein/Aus und Helligkeit, Skala 0–254).
-- [docs/CLAUDE_EINBINDEN.md](docs/CLAUDE_EINBINDEN.md) – Claude/.mcpb-Einbindung.
-- [docs/MODULREFERENZ.md](docs/MODULREFERENZ.md) – Modulreferenz (Geräte) von Symcon.
-- [docs/AUTOMATIONEN.md](docs/AUTOMATIONEN.md) – Automationen: Skripte, Timer, zyklische Events, Ordnerstruktur (MCP Automations/Thema/Raum), Registry, keine Duplikate.
+✅ Status wird **grün**: "Verbunden mit MCP Server"
+
+#### 4. KI-Client verbinden (z.B. Claude Desktop)
+
+Siehe: [Claude einbinden](docs/CLAUDE_EINBINDEN.md)
+
+---
+
+## 📋 Deployment-Szenarien
+
+### Szenario 1: Alles lokal (einfachste Variante)
+```
+PC/Mac: Docker + Symcon + Claude
+```
+- Docker-Host = Symcon-Server = localhost
+- `.env`: `SYMCON_API_URL=http://127.0.0.1:3777/api/`
+- Symcon-Modul: `MCP Server URL: http://localhost:4096`
+
+### Szenario 2: Docker auf PC, Symcon auf SymBox (Standard)
+```
+PC: Docker + Claude  ←→  SymBox: Symcon
+```
+- Docker-Host (PC): `192.168.1.50`
+- SymBox: `192.168.1.100`
+- `.env`: `SYMCON_API_URL=http://192.168.1.100:3777/api/`
+- Symcon-Modul: `MCP Server URL: http://192.168.1.50:4096`
+
+### Szenario 3: Docker im Internet (VPS/Cloud)
+```
+Heimnetz (SymBox) ←Internet→ VPS (Docker)
+```
+- Erfordert: VPN/Tunnel oder WebSocket-Bridge
+- Siehe: [Architektur Server im Internet](docs/ARCHITEKTUR_SERVER_IM_INTERNET.md)
+
+---
+
+## 🔐 Sicherheit
+
+**Implementierte Maßnahmen:**
+- ✅ Verpflichtender API-Key (Server startet nicht ohne)
+- ✅ Rate Limiting (100 Requests/min)
+- ✅ Audit Logging (alle Tool-Calls)
+- ✅ Health-Check-Endpoint
+- ✅ Constant-Time Token-Vergleich
+
+**Best Practices:**
+```bash
+# Sicheren API-Key generieren
+openssl rand -hex 32
+
+# File-Permissions setzen
+chmod 600 .env
+
+# Firewall (optional, nur localhost)
+sudo ufw allow from 127.0.0.1 to any port 4096
+```
+
+📖 Mehr: [Sicherheitskonzept](docs/SICHERHEITSKONZEPT.md)
+
+---
+
+## 🛠️ Verwaltung
+
+### Status prüfen
+```bash
+docker ps | grep symcon-mcp-server
+curl http://localhost:4096/health
+```
+
+### Logs anzeigen
+```bash
+docker logs -f symcon-mcp-server
+
+# Nur Security-Warnungen
+docker logs symcon-mcp-server | jq 'select(.level=="SECURITY_WARNING")'
+```
+
+### Neu starten
+```bash
+docker-compose restart
+```
+
+### Stoppen
+```bash
+./stop-docker.sh
+```
+
+### Updates installieren
+```bash
+git pull
+./build-docker.sh
+./start-docker.sh
+```
+
+---
+
+## 🧰 MCP-Tools (Auszug)
+
+**Basis-Steuerung:**
+- `symcon_get_value` – Variable lesen
+- `symcon_set_value` – Variable schreiben
+- `symcon_request_action` – Aktion auslösen (Licht, Jalousie, etc.)
+
+**Discovery:**
+- `symcon_get_object_tree` – Objektbaum durchsuchen
+- `symcon_control_device` – Gerät per Sprache steuern
+- `symcon_get_variable_by_path` – Variable per Pfad finden
+
+**Wissensbasis (Sprachsteuerung):**
+- `symcon_knowledge_set` – Gerät lernen ("Büro Licht" → variableId)
+- `symcon_resolve_device` – Phrase auflösen
+- `symcon_snapshot_variables` + `symcon_diff_variables` – Gerät per Vorher/Nachher finden
+
+**Automationen:**
+- `symcon_schedule_once` – Einmaliger Timer
+- `symcon_script_create` – PHP-Skript erstellen
+- `symcon_event_create_cyclic` – Zyklisches Event
+
+📖 Vollständige Liste: [Modulreferenz](docs/MODULREFERENZ.md)
+
+---
+
+## 📚 Dokumentation
+
+| Dokument | Beschreibung |
+|----------|--------------|
+| [DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md) | Vollständiger Docker-Guide |
+| [ANLEITUNG_INSTALLATION.md](ANLEITUNG_INSTALLATION.md) | Schritt-für-Schritt Anleitung |
+| [SICHERHEITSKONZEPT.md](docs/SICHERHEITSKONZEPT.md) | Security-Übersicht |
+| [CLAUDE_EINBINDEN.md](docs/CLAUDE_EINBINDEN.md) | Claude Desktop Integration |
+| [SPRACHASSISTENT_BAUEN.md](docs/SPRACHASSISTENT_BAUEN.md) | Voice-Interface bauen |
+| [STEUERUNG_HINWEISE.md](docs/STEUERUNG_HINWEISE.md) | Geräte-spezifische Tipps |
+| [AUTOMATIONEN.md](docs/AUTOMATIONEN.md) | Zeitgesteuerte Aktionen |
+| [MODULREFERENZ.md](docs/MODULREFERENZ.md) | Alle MCP-Tools |
+| [CHANGELOG.md](CHANGELOG.md) | Versionshistorie |
+
+---
+
+## 🔄 Migration von v1.x
+
+Falls Sie eine alte Installation haben:
+
+```bash
+./scripts/migrate-from-local.sh
+```
+
+Das Script:
+- Stoppt alte Node.js-Prozesse
+- Sichert Knowledge Store (JSON-Dateien)
+- Erstellt `.env` mit migriertem API-Key
+- Führt durch das Docker-Setup
+
+---
+
+## 🐛 Troubleshooting
+
+### Container startet nicht
+```bash
+# Logs prüfen
+docker logs symcon-mcp-server
+
+# .env validieren
+./scripts/validate-env.sh
+```
+
+### Health-Check schlägt fehl
+```bash
+# MCP_AUTH_TOKEN gesetzt?
+grep MCP_AUTH_TOKEN .env
+
+# Port belegt?
+lsof -i :4096
+```
+
+### Symcon-Modul zeigt "Nicht verbunden"
+1. ✅ Container läuft? (`docker ps`)
+2. ✅ Health-Check OK? (`curl http://localhost:4096/health`)
+3. ✅ MCP Server URL korrekt?
+4. ✅ API-Key identisch (.env ↔ Symcon-Modul)?
+5. ✅ Firewall blockiert Port 4096?
+
+📖 Mehr: [Docker Deployment Guide](docs/DOCKER_DEPLOYMENT.md#troubleshooting)
+
+---
+
+## 💻 Entwicklung
+
+### Lokaler Build
+```bash
+cd libs/mcp-server
+npm install
+npm run build
+```
+
+### TypeScript-Code ändern
+Nach Änderungen in `src/`:
+```bash
+npm run build
+git add dist/  # Pre-compiled für Git-Installationen
+```
+
+### Docker-Image lokal testen
+```bash
+./build-docker.sh
+docker run -it --rm --env-file .env -p 4096:4096 symcon-mcp-server:latest
+```
+
+---
+
+## 🤝 Beitragen
+
+Pull Requests willkommen! Bitte beachten:
+- **Breaking Changes** → Major-Version (3.0.0)
+- **Features** → Minor-Version (2.1.0)
+- **Bugfixes** → Patch-Version (2.0.1)
+
+**Wichtige Dateien für PRs:**
+- `libs/mcp-server/src/` – TypeScript-Code
+- `MCPServer/` – PHP-Modul
+- `docs/` – Dokumentation
+- `CHANGELOG.md` – Änderungen beschreiben
+
+---
+
+## 📄 Lizenz
+
+MIT License – siehe [LICENSE](LICENSE)
+
+---
+
+## 🙏 Credits
+
+- [@modelcontextprotocol](https://github.com/modelcontextprotocol) für das MCP SDK
+- Community für Feedback und Testing
+- IP-Symcon für die exzellente Smart Home Platform
+
+---
+
+## ⭐ Support
+
+Bei Fragen oder Problemen:
+- [GitHub Issues](https://github.com/beeXperts-Niko/symcon-mcp-server/issues)
+- [Dokumentation](docs/)
+- Logs prüfen: `docker logs symcon-mcp-server`

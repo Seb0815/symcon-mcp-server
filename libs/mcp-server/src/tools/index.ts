@@ -9,8 +9,82 @@ import { join } from 'node:path';
 import type { SymconClient } from '../symcon/SymconClient.js';
 import { getKnowledgeStore } from '../knowledge/KnowledgeStore.js';
 import { getAutomationStore } from '../knowledge/AutomationStore.js';
-import type { ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+
+// ============================================================================
+// Audit Logging
+// ============================================================================
+const LOG_LEVEL = process.env.MCP_LOG_LEVEL?.toLowerCase() || 'info';
+const ENABLE_DEBUG = LOG_LEVEL === 'debug';
+
+interface AuditLogEntry {
+  timestamp: string;
+  toolName: string;
+  args: unknown;
+  result?: unknown;
+  error?: string;
+  duration: number;
+}
+
+function logAudit(entry: AuditLogEntry): void {
+  // Always log to stderr in JSON format for Docker logs
+  const logLine = JSON.stringify(entry);
+  process.stderr.write(logLine + '\n');
+}
+
+type ToolHandler = (args: unknown) => Promise<{ content: Array<{ type: string; text: string }> }>;
+
+function createAuditWrapper(toolName: string, handler: ToolHandler): ToolHandler {
+  return async (args: unknown) => {
+    const startTime = Date.now();
+    const timestamp = new Date().toISOString();
+    
+    // Log sensitive operations with security warning
+    const sensitiveTools = ['symcon_script_create', 'symcon_script_set_content', 'symcon_run_script'];
+    if (sensitiveTools.includes(toolName)) {
+      process.stderr.write(
+        JSON.stringify({
+          timestamp,
+          level: 'SECURITY_WARNING',
+          toolName,
+          message: 'Executing tool that allows code execution or script modification'
+        }) + '\n'
+      );
+    }
+
+    try {
+      const result = await handler(args);
+      const duration = Date.now() - startTime;
+      
+      // Log successful calls (only in debug mode for non-critical tools)
+      if (ENABLE_DEBUG || sensitiveTools.includes(toolName)) {
+        logAudit({
+          timestamp,
+          toolName,
+          args: ENABLE_DEBUG ? args : '[redacted]',
+          result: ENABLE_DEBUG ? result : '[success]',
+          duration
+        });
+      }
+      
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Always log errors
+      logAudit({
+        timestamp,
+        toolName,
+        args: ENABLE_DEBUG ? args : '[redacted]',
+        error: errorMessage,
+        duration
+      });
+      
+      throw error;
+    }
+  };
+}
 
 const variableIdSchema = z.object({ variableId: z.number().int().positive() });
 const objectIdSchema = z.object({ objectId: z.number().int().positive() });
@@ -31,8 +105,8 @@ function getArgs<T>(args: unknown): T {
 
 type HandlerArgs = unknown;
 
-export function createToolHandlers(client: SymconClient): Record<string, { description: string; inputSchema: z.ZodType; handler: ToolCallback }> {
-  return {
+export function createToolHandlers(client: SymconClient): Record<string, { description: string; inputSchema: z.ZodType; handler: ToolHandler }> {
+  const handlers = {
     symcon_ping: {
       description:
         'Verbindungs-/Auth-Test zur Symcon-API. Ruft IPS_GetKernelVersion auf und liefert die Kernel-Version zurück. Wenn hier 401 kommt, fehlt Remote-Access Basic-Auth (oder SYMCON_API_URL ist falsch).',
@@ -1023,4 +1097,16 @@ if (IPS_SemaphoreEnter("MCP_TIMER_QUEUE", 2000)) {
       },
     },
   };
+  
+  // Wrap all handlers with audit logging
+  const wrappedHandlers: Record<string, { description: string; inputSchema: z.ZodType; handler: ToolHandler }> = {};
+  for (const [toolName, toolDef] of Object.entries(handlers)) {
+    wrappedHandlers[toolName] = {
+      description: toolDef.description,
+      inputSchema: toolDef.inputSchema,
+      handler: createAuditWrapper(toolName, toolDef.handler)
+    };
+  }
+  
+  return wrappedHandlers;
 }

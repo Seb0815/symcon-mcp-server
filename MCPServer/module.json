@@ -1,9 +1,9 @@
 {
-  "id": "{B2C3D4E5-F6A7-5B6C-9D0E-1F2A3B4C5D6E}",
-  "name": "MCP Server",
+  "id": "{76E3F49B-DEC8-EE13-5001-FDDCE7C82500}",
+  "name": "MCPServer",
   "type": 4,
   "vendor": "Symcon",
-  "aliases": ["MCP Server"],
+  "aliases": ["MCPServer"],
   "parentRequirements": [],
   "childRequirements": [],
   "implemented": [],
