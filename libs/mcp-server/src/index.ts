@@ -353,17 +353,23 @@ async function main(): Promise<void> {
 
     // Intercept response to log status code and body
     if (ENABLE_DEBUG) {
-      const origWriteHead = res.writeHead.bind(res);
-      const origEnd = res.end.bind(res);
-      (res as any).writeHead = (...args: any[]) => {
+      const origWriteHead = res.writeHead;
+      const origEnd = res.end;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (res as any).writeHead = function () {
+        // eslint-disable-next-line prefer-rest-params
+        const args = arguments;
         debugLog('MCP-RES', `--- Response for ${req.method} ${req.url} ---`);
         debugLog('MCP-RES', `Status: ${args[0]}`);
         if (args[1] && typeof args[1] === 'object' && !Array.isArray(args[1])) {
           debugLog('MCP-RES', `Headers: ${JSON.stringify(args[1])}`);
         }
-        return origWriteHead(...args);
+        return origWriteHead.apply(res, args as any);
       };
-      (res as any).end = (...args: any[]) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (res as any).end = function () {
+        // eslint-disable-next-line prefer-rest-params
+        const args = arguments;
         const chunk = args[0];
         if (chunk) {
           const bodyStr = typeof chunk === 'string' ? chunk : (Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk));
@@ -372,7 +378,7 @@ async function main(): Promise<void> {
           debugLog('MCP-RES', `Body: (empty/stream)`);
         }
         debugLog('MCP-RES', `----------------------------------------`);
-        return origEnd(...args);
+        return origEnd.apply(res, args as any);
       };
     }
 
