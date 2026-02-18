@@ -5,6 +5,18 @@
 
 const DEFAULT_TIMEOUT_MS = 10000;
 
+// ============================================================================
+// Debug Logging (shared with index.ts via env var)
+// ============================================================================
+const LOG_LEVEL = (process.env.MCP_LOG_LEVEL ?? 'info').toLowerCase();
+const ENABLE_DEBUG = LOG_LEVEL === 'debug';
+
+function debugLog(prefix: string, message: string): void {
+  if (ENABLE_DEBUG) {
+    process.stderr.write(`[${prefix}] ${message}\n`);
+  }
+}
+
 export interface SymconRpcResponse<T = unknown> {
   jsonrpc: '2.0';
   result?: T;
@@ -40,14 +52,29 @@ export class SymconClient {
    */
   async call<T = unknown>(method: string, params: unknown[] | Record<string, unknown> = []): Promise<T> {
     const id = ++this.requestId;
+    const resolvedParams = Array.isArray(params) ? params : this.paramsToArray(method, params);
     const body = {
       jsonrpc: '2.0',
       method,
-      params: Array.isArray(params) ? params : this.paramsToArray(method, params),
+      params: resolvedParams,
       id,
     };
+    const bodyStr = JSON.stringify(body);
+    const startTime = Date.now();
+
+    debugLog('SYMCON-RPC', `--- Request #${id} --------------------------`);
+    debugLog('SYMCON-RPC', `URL: ${this.baseUrl}`);
+    debugLog('SYMCON-RPC', `Method: ${method}`);
+    debugLog('SYMCON-RPC', `Params: ${JSON.stringify(resolvedParams)}`);
+    debugLog('SYMCON-RPC', `Auth: ${this.authHeader ? `${this.authHeader.name}: ${this.authHeader.value.substring(0, 10)}...` : '(none)'}`);
+    debugLog('SYMCON-RPC', `Timeout: ${this.timeoutMs}ms`);
+    debugLog('SYMCON-RPC', `Body: ${bodyStr.length > 500 ? bodyStr.substring(0, 500) + '...' : bodyStr}`);
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(() => {
+      debugLog('SYMCON-RPC', `[FAIL] Request #${id} TIMEOUT after ${this.timeoutMs}ms`);
+      controller.abort();
+    }, this.timeoutMs);
     try {
       const res = await fetch(this.baseUrl, {
         method: 'POST',
@@ -55,21 +82,53 @@ export class SymconClient {
           'Content-Type': 'application/json',
           ...(this.authHeader ? { [this.authHeader.name]: this.authHeader.value } : {}),
         },
-        body: JSON.stringify(body),
+        body: bodyStr,
         signal: controller.signal,
       });
       clearTimeout(timeout);
+      const duration = Date.now() - startTime;
+
+      debugLog('SYMCON-RPC', `Response #${id}: HTTP ${res.status} ${res.statusText} (${duration}ms)`);
+
       if (!res.ok) {
+        const errorBody = await res.text().catch(() => '(no body)');
+        debugLog('SYMCON-RPC', `[FAIL] HTTP Error Body: ${errorBody.substring(0, 500)}`);
         throw new Error(`Symcon API HTTP ${res.status}: ${res.statusText}`);
       }
-      const data = (await res.json()) as SymconRpcResponse<T>;
+
+      const rawText = await res.text();
+      debugLog('SYMCON-RPC', `Response Body #${id}: ${rawText.length > 500 ? rawText.substring(0, 500) + '...' : rawText}`);
+
+      let data: SymconRpcResponse<T>;
+      try {
+        data = JSON.parse(rawText) as SymconRpcResponse<T>;
+      } catch (parseErr) {
+        debugLog('SYMCON-RPC', `[FAIL] JSON parse error for response #${id}: ${String(parseErr)}`);
+        throw new Error(`Symcon API returned invalid JSON: ${rawText.substring(0, 200)}`);
+      }
+
       if (data.error) {
+        debugLog('SYMCON-RPC', `[FAIL] RPC Error #${id}: ${data.error.message} (code ${data.error.code})`);
+        if (data.error.data) {
+          debugLog('SYMCON-RPC', `   Error data: ${JSON.stringify(data.error.data)}`);
+        }
         throw new Error(`Symcon RPC error: ${data.error.message} (code ${data.error.code})`);
       }
+
+      debugLog('SYMCON-RPC', `[OK] Success #${id}: ${method} (${duration}ms)`);
       return data.result as T;
     } catch (err) {
       clearTimeout(timeout);
-      if (err instanceof Error) throw err;
+      const duration = Date.now() - startTime;
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        debugLog('SYMCON-RPC', `[FAIL] Request #${id} aborted (timeout after ${duration}ms)`);
+        throw new Error(`Symcon API timeout after ${this.timeoutMs}ms for method ${method}`);
+      }
+      if (err instanceof Error) {
+        debugLog('SYMCON-RPC', `[FAIL] Request #${id} failed (${duration}ms): ${err.message}`);
+        throw err;
+      }
+      debugLog('SYMCON-RPC', `[FAIL] Request #${id} failed (${duration}ms): ${String(err)}`);
       throw new Error(String(err));
     }
   }

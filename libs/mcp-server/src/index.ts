@@ -53,6 +53,23 @@ const USE_HTTPS = process.env.MCP_HTTPS === '1' || process.env.MCP_HTTPS === 'tr
 const TLS_CERT_PATH = process.env.MCP_TLS_CERT ?? join(process.cwd(), 'certs', 'server.crt');
 const TLS_KEY_PATH = process.env.MCP_TLS_KEY ?? join(process.cwd(), 'certs', 'server.key');
 
+// ============================================================================
+// Debug Logging
+// ============================================================================
+const LOG_LEVEL = (process.env.MCP_LOG_LEVEL ?? 'info').toLowerCase();
+const ENABLE_DEBUG = LOG_LEVEL === 'debug';
+
+function debugLog(prefix: string, message: string): void {
+  if (ENABLE_DEBUG) {
+    process.stderr.write(`[${prefix}] ${message}\n`);
+  }
+}
+
+function maskToken(token: string): string {
+  if (token.length <= 8) return '(too short to mask)';
+  return token.substring(0, 4) + '...' + token.substring(token.length - 4);
+}
+
 function constantTimeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, 'utf8');
   const bufB = Buffer.from(b, 'utf8');
@@ -62,14 +79,82 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 function isAuthorized(req: IncomingMessage): boolean {
-  if (!MCP_AUTH_TOKEN) return true;
+  const url = req.url ?? '(unknown)';
+  const method = req.method ?? '(unknown)';
+
+  debugLog('AUTH-DEBUG', `----------------------------------------`);
+  debugLog('AUTH-DEBUG', `${method} ${url}`);
+  debugLog('AUTH-DEBUG', `Content-Type: ${req.headers['content-type'] ?? '(none)'}`);
+  debugLog('AUTH-DEBUG', `Accept: ${req.headers['accept'] ?? '(none)'}`);
+
+  if (!MCP_AUTH_TOKEN) {
+    debugLog('AUTH-DEBUG', `No MCP_AUTH_TOKEN configured – skipping auth`);
+    return true;
+  }
+
+  debugLog('AUTH-DEBUG', `Expected token (masked): ${maskToken(MCP_AUTH_TOKEN)}`);
+  debugLog('AUTH-DEBUG', `Expected token length: ${MCP_AUTH_TOKEN.length}`);
+
   const authHeader = req.headers.authorization;
   const apiKeyHeader = req.headers['x-mcp-api-key'];
+
+  debugLog('AUTH-DEBUG', `Authorization header present: ${!!authHeader}`);
+  debugLog('AUTH-DEBUG', `X-MCP-API-Key header present: ${!!apiKeyHeader}`);
+
+  if (authHeader) {
+    debugLog('AUTH-DEBUG', `Authorization header (masked): ${maskToken(authHeader)}`);
+    debugLog('AUTH-DEBUG', `Authorization header length: ${authHeader.length}`);
+  }
+  if (apiKeyHeader && typeof apiKeyHeader === 'string') {
+    debugLog('AUTH-DEBUG', `X-MCP-API-Key header (masked): ${maskToken(apiKeyHeader)}`);
+  }
+
+  if (ENABLE_DEBUG) {
+    const safeHeaders = { ...req.headers };
+    if (safeHeaders.authorization) safeHeaders.authorization = maskToken(String(safeHeaders.authorization));
+    if (safeHeaders['x-mcp-api-key']) safeHeaders['x-mcp-api-key'] = maskToken(String(safeHeaders['x-mcp-api-key']));
+    debugLog('AUTH-DEBUG', `All headers: ${JSON.stringify(safeHeaders, null, 2)}`);
+  }
+
   const bearer = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
     ? authHeader.slice(7).trim()
     : '';
   const key = typeof apiKeyHeader === 'string' ? apiKeyHeader.trim() : '';
-  return constantTimeEqual(bearer, MCP_AUTH_TOKEN) || constantTimeEqual(key, MCP_AUTH_TOKEN);
+
+  if (bearer) {
+    debugLog('AUTH-DEBUG', `Extracted Bearer token length: ${bearer.length}`);
+    debugLog('AUTH-DEBUG', `Extracted Bearer token (masked): ${maskToken(bearer)}`);
+    const bearerMatch = constantTimeEqual(bearer, MCP_AUTH_TOKEN);
+    if (bearerMatch) {
+      debugLog('AUTH-DEBUG', `[OK] Bearer token VALID - request authorized`);
+    } else {
+      debugLog('AUTH-DEBUG', `[FAIL] Bearer token MISMATCH`);
+      if (bearer.length !== MCP_AUTH_TOKEN.length) {
+        debugLog('AUTH-DEBUG', `   Token length mismatch: got ${bearer.length}, expected ${MCP_AUTH_TOKEN.length}`);
+      } else {
+        debugLog('AUTH-DEBUG', `   First 4 chars – provided: '${bearer.substring(0, 4)}', expected: '${MCP_AUTH_TOKEN.substring(0, 4)}'`);
+      }
+    }
+    if (bearerMatch) return true;
+  } else {
+    debugLog('AUTH-DEBUG', `No Bearer token extracted from Authorization header`);
+  }
+
+  if (key) {
+    debugLog('AUTH-DEBUG', `Extracted X-MCP-API-Key length: ${key.length}`);
+    const keyMatch = constantTimeEqual(key, MCP_AUTH_TOKEN);
+    if (keyMatch) {
+      debugLog('AUTH-DEBUG', `[OK] X-MCP-API-Key VALID - request authorized`);
+    } else {
+      debugLog('AUTH-DEBUG', `[FAIL] X-MCP-API-Key MISMATCH`);
+    }
+    if (keyMatch) return true;
+  } else {
+    debugLog('AUTH-DEBUG', `No X-MCP-API-Key token found`);
+  }
+
+  process.stderr.write(`[AUTH-WARN] [FAIL] 401 - Unauthorized request: ${method} ${url} from ${req.socket?.remoteAddress ?? 'unknown'}\n`);
+  return false;
 }
 
 function readBody(req: import('node:http').IncomingMessage): Promise<unknown> {
@@ -197,6 +282,14 @@ async function main(): Promise<void> {
   await mcp.connect(httpTransport);
 
   const requestHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // ──── Global Request Debug Logging ────
+    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim()
+                     || req.socket.remoteAddress
+                     || 'unknown';
+    debugLog('MCP-REQ', `--- Incoming ${req.method} ${req.url} ---`);
+    debugLog('MCP-REQ', `Remote: ${clientIp}`);
+    debugLog('MCP-REQ', `User-Agent: ${req.headers['user-agent'] ?? '(none)'}`);
+
     // Health check endpoint (always accessible, no auth required)
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -211,9 +304,6 @@ async function main(): Promise<void> {
     }
 
     // Rate limiting (check before auth to prevent brute force)
-    const clientIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() 
-                     || req.socket.remoteAddress 
-                     || 'unknown';
     const rateCheck = checkRateLimit(clientIp);
     if (!rateCheck.allowed) {
       res.writeHead(429, {
@@ -231,9 +321,13 @@ async function main(): Promise<void> {
     }
 
     if (req.method === 'POST' && !isAuthorized(req)) {
+      debugLog('MCP-REQ', `[FAIL] Responding 401 Unauthorized for POST ${req.url}`);
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Unauthorized', message: 'Missing or invalid API key' }));
       return;
+    }
+    if (req.method === 'POST') {
+      debugLog('MCP-REQ', `[OK] POST ${req.url} authorized - forwarding to transport`);
     }
     const allowedOrigins = [
       `http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`,
