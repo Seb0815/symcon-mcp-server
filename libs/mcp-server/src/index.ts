@@ -1,7 +1,16 @@
 /**
- * Symcon MCP Server – Streamable HTTP/HTTPS entry point.
- * Reads MCP_PORT, SYMCON_API_URL, MCP_AUTH_TOKEN from environment (set by Symcon module).
- * Optional HTTPS: MCP_HTTPS=1, MCP_TLS_CERT und MCP_TLS_KEY (Pfade zu PEM-Dateien).
+ * Symcon MCP Server – Dual-Transport MCP Server
+ *  
+ * Transport 1: StreamableHTTP (for HTTP-based clients like Symcon PHP-Module)
+ * Transport 2: Stdio (for local VSCode clients)
+ * 
+ * Environment Variables:
+ * - MCP_TRANSPORT: "streamable-http" (default), "stdio", or "both"
+ * - MCP_PORT: Port for HTTP (default: 4096)
+ * - SYMCON_API_URL: Symcon JSON-RPC endpoint
+ * - MCP_AUTH_TOKEN: API key for authentication
+ * - MCP_HTTPS: Enable HTTPS (1/true)
+ * - MCP_TLS_CERT, MCP_TLS_KEY: Paths to TLS certificates
  */
 
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -13,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SymconClient } from './symcon/SymconClient.js';
 import { createToolHandlers } from './tools/index.js';
 
@@ -181,10 +191,10 @@ async function main(): Promise<void> {
     );
   }
 
-  const transport = new StreamableHTTPServerTransport({
+  const httpTransport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });
-  await mcp.connect(transport);
+  await mcp.connect(httpTransport);
 
   const requestHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     // Health check endpoint (always accessible, no auth required)
@@ -236,7 +246,7 @@ async function main(): Promise<void> {
       return;
     }
     const body = req.method === 'POST' ? await readBody(req) : undefined;
-    await transport.handleRequest(req, res, body);
+    await httpTransport.handleRequest(req, res, body);
   };
 
   let server: import('node:http').Server | import('node:https').Server;
@@ -260,20 +270,72 @@ async function main(): Promise<void> {
   }
 
   const scheme = USE_HTTPS ? 'https' : 'http';
-  server.listen(PORT, HOST, () => {
-    process.stderr.write(
-      '\n' +
-      '╔═══════════════════════════════════════════════════════════════════════╗\n' +
-      `║  Symcon MCP Server v${PKG_VERSION.padEnd(46)} ║\n` +
-      '╠═══════════════════════════════════════════════════════════════════════╣\n' +
-      `║  Listening:   ${(scheme + '://' + HOST + ':' + PORT).padEnd(52)} ║\n` +
-      `║  Symcon API:  ${SYMCON_API_URL.padEnd(52)} ║\n` +
-      `║  Auth:        API key required (✓)${' '.padEnd(30)} ║\n` +
-      `║  Health:      ${(scheme + '://' + HOST + ':' + PORT + '/health').padEnd(52)} ║\n` +
-      '╚═══════════════════════════════════════════════════════════════════════╝\n' +
-      '\n'
-    );
-  });
+  const transportMode = (process.env.MCP_TRANSPORT ?? 'streamable-http');
+
+  // Support both HTTP and Stdio transports
+  if (transportMode === 'stdio' || transportMode === 'both') {
+    // Stdio transport for local VSCode integration
+    const stdio = new StdioServerTransport();
+    mcp.connect(stdio).catch((err) => {
+      process.stderr.write('Stdio transport error: ' + String(err) + '\n');
+    });
+    process.stderr.write('✓ Stdio transport ready (for local VSCode)\n');
+  }
+
+  if (transportMode === 'streamable-http' || transportMode === 'both') {
+    // HTTP transport for Symcon and remote clients
+    server.listen(PORT, HOST, () => {
+      process.stderr.write(
+        '\n' +
+        '╔═══════════════════════════════════════════════════════════════════════╗\n' +
+        `║  Symcon MCP Server v${PKG_VERSION.padEnd(46)} ║\n` +
+        '╠═══════════════════════════════════════════════════════════════════════╣\n' +
+        `║  Listening:   ${(scheme + '://' + HOST + ':' + PORT).padEnd(52)} ║\n` +
+        `║  Symcon API:  ${SYMCON_API_URL.padEnd(52)} ║\n` +
+        `║  Auth:        API key required (✓)${' '.padEnd(30)} ║\n` +
+        `║  Health:      ${(scheme + '://' + HOST + ':' + PORT + '/health').padEnd(52)} ║\n` +
+        `║  Endpoint:    ${(scheme + '://' + HOST + ':' + PORT + '/').padEnd(52)} ║\n` +
+        '║                                                                       ║\n' +
+        '║  VSCode Clients:                                                    ║\n' +
+        '║  Option 1: Stdio (Local Mode)                                       ║\n' +
+        '║    {                                                                ║\n' +
+        '║      "modelContextProtocol": {                                      ║\n' +
+        '║        "servers": {                                                 ║\n' +
+        '║          "symcon-mcp-stdio": {                                      ║\n' +
+        '║            "command": "node",                                       ║\n' +
+        `║            "args": ["path/to/node_modules/.bin/mcp-server"]   ║\n` +
+        '║            "env": {                                                 ║\n' +
+        '║              "MCP_TRANSPORT": "stdio",                              ║\n' +
+        `║              "MCP_AUTH_TOKEN": "YOUR_KEY"                  ║\n` +
+        '║              "SYMCON_API_URL": "http://localhost:3777/api/"        ║\n' +
+        '║            }                                                        ║\n' +
+        '║          }                                                          ║\n' +
+        '║        }                                                            ║\n' +
+        '║      }                                                              ║\n' +
+        '║                                                                     ║\n' +
+        '║  Option 2: HTTP (Remote Mode)                                       ║\n' +
+        '║    {                                                                ║\n' +
+        '║      "modelContextProtocol": {                                      ║\n' +
+        '║        "servers": {                                                 ║\n' +
+        '║          "symcon-mcp-http": {                                       ║\n' +
+        '║            "command": "node",                                       ║\n' +
+        `║            "args": ["path/to/http-client.js"]           ║\n` +
+        '║            "env": {                                                 ║\n' +
+        `║              "MCP_SERVER_URL": "${scheme}://${HOST}:${PORT}" ║\n` +
+        '║              "MCP_API_KEY": "YOUR_KEY"                              ║\n' +
+        '║            }                                                        ║\n' +
+        '║          }                                                          ║\n' +
+        '║        }                                                            ║\n' +
+        '║      }                                                              ║\n' +
+        '║                                                                     ║\n' +
+        '╚═══════════════════════════════════════════════════════════════════════╝\n' +
+        '\n'
+      );
+    });
+  } else if (transportMode !== 'stdio') {
+    process.stderr.write(`Warning: Unknown MCP_TRANSPORT="${transportMode}". Using streamable-http.\n`);
+    server.listen(PORT, HOST);
+  }
 }
 
 main().catch((err) => {
