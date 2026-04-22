@@ -60,6 +60,57 @@ fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  API-Zugriff (Access Control)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  Welche Tools soll der KI-Client verwenden dürfen?"
+echo "  1) read-only  (Standard, empfohlen) – nur Lesen, keine Steuerung"
+echo "  2) full                              – alle Tools inkl. Steuerung & Skripte"
+echo "  3) custom                            – Kategorien einzeln freischalten"
+echo ""
+read -p "Modus [1/2/3, Standard: 1]: " ACCESS_CHOICE
+ACCESS_CHOICE=${ACCESS_CHOICE:-1}
+
+case $ACCESS_CHOICE in
+    2)
+        ACCESS_MODE="full"
+        echo ""
+        echo "  ⚠️  WARNUNG: Im full-Modus kann der KI-Client Geräte steuern,"
+        echo "     Skripte erstellen und ausführen. Nur für vertrauenswürdige"
+        echo "     Clients verwenden."
+        ;;
+    3)
+        ACCESS_MODE="custom"
+        echo ""
+        read -p "  Gerätsteuerung erlauben (request_action, set_value)? [y/N]: " -n 1 -r
+        echo ""
+        ALLOW_CONTROL="false"
+        [[ $REPLY =~ ^[Yy]$ ]] && ALLOW_CONTROL="true"
+
+        read -p "  Wissensbasis schreiben (knowledge_set, …)? [y/N]: " -n 1 -r
+        echo ""
+        ALLOW_KW="false"
+        [[ $REPLY =~ ^[Yy]$ ]] && ALLOW_KW="true"
+
+        read -p "  Skripte/Events erstellen & ausführen? [y/N]: " -n 1 -r
+        echo ""
+        ALLOW_AUTO="false"
+        [[ $REPLY =~ ^[Yy]$ ]] && ALLOW_AUTO="true"
+
+        sed -i.bak "s/^MCP_ALLOW_CONTROL=.*/MCP_ALLOW_CONTROL=$ALLOW_CONTROL/" .env
+        sed -i.bak "s/^MCP_ALLOW_KNOWLEDGE_WRITE=.*/MCP_ALLOW_KNOWLEDGE_WRITE=$ALLOW_KW/" .env
+        sed -i.bak "s/^MCP_ALLOW_AUTOMATION=.*/MCP_ALLOW_AUTOMATION=$ALLOW_AUTO/" .env
+        ;;
+    *)
+        ACCESS_MODE="read-only"
+        ;;
+esac
+
+sed -i.bak "s/^MCP_ACCESS_MODE=.*/MCP_ACCESS_MODE=$ACCESS_MODE/" .env
+echo "  ✓ Access-Modus: $ACCESS_MODE"
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  API-Schlüssel generieren"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

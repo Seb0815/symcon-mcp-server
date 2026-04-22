@@ -6,13 +6,13 @@
     },
     {
       "type": "Label",
-      "caption": "🐳 Docker MCP Server Konfiguration",
+      "caption": "Docker MCP Server Konfiguration",
       "fontSize": 16,
       "bold": true
     },
     {
       "type": "Label",
-      "caption": "Der MCP Server läuft jetzt in einem Docker-Container. Dieses Modul verbindet sich per HTTP zum Server."
+      "caption": "Der MCP Server läuft extern (z.B. in einem Docker-Container). Dieses Modul verbindet sich per HTTP zum Server."
     },
     {
       "type": "Label",
@@ -30,7 +30,7 @@
     },
     {
       "type": "Label",
-      "caption": "URL des Docker-MCP-Servers (inkl. Port). Beispiele: http://localhost:4096 oder http://192.168.1.100:4096"
+      "caption": "URL des MCP-Servers (inkl. Port). Beispiele: http://localhost:4096 oder http://192.168.1.100:4096"
     },
     {
       "type": "ValidationTextBox",
@@ -49,7 +49,7 @@
     },
     {
       "type": "Label",
-      "caption": "Der API-Schlüssel muss mit dem MCP_AUTH_TOKEN in der Docker .env-Datei übereinstimmen. Generieren Sie einen mit: openssl rand -hex 32"
+      "caption": "Der API-Schlüssel muss mit dem MCP_AUTH_TOKEN im externen Server übereinstimmen. Generieren Sie einen mit: openssl rand -hex 32"
     },
     {
       "type": "PasswordTextBox",
@@ -58,7 +58,7 @@
     },
     {
       "type": "Label",
-      "caption": "WICHTIG: Dieser Key muss auch in der .env-Datei des Docker-Containers (MCP_AUTH_TOKEN) gesetzt sein!"
+      "caption": "WICHTIG: Dieser Key muss auch im externen Servers (MCP_AUTH_TOKEN) gesetzt sein!"
     },
     {
       "type": "Label",
@@ -89,40 +89,16 @@
     },
     {
       "type": "Label",
-      "caption": "ℹ️ Setup-Hinweise",
+      "caption": "Setup-Hinweise",
       "fontSize": 14,
       "bold": true
-    },
-    {
-      "type": "Label",
-      "caption": "1. Docker-Container starten: ./start-docker.sh"
-    },
-    {
-      "type": "Label",
-      "caption": "2. API-Key aus .env-Datei kopieren (MCP_AUTH_TOKEN=...)"
-    },
-    {
-      "type": "Label",
-      "caption": "3. Hier eintragen und 'Änderungen übernehmen' klicken"
-    },
-    {
-      "type": "Label",
-      "caption": "4. Status-Variable zeigt Verbindung (grün = OK)"
-    },
-    {
-      "type": "Label",
-      "caption": ""
-    },
-    {
-      "type": "Label",
-      "caption": "Dokumentation: docs/DOCKER_DEPLOYMENT.md"
     }
   ],
   "actions": [
     {
       "type": "Button",
       "caption": "Verbindung testen",
-      "onClick": "MCPServer_TestConnection($id);"
+      "onClick": "echo MCP_TestConnection($id);"
     }
   ]
 }

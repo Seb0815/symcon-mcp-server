@@ -27,6 +27,9 @@ if ! grep -q "^MCP_AUTH_TOKEN=.\+" .env; then
     exit 1
 fi
 
+# Ensure data directory exists (volume mount target)
+mkdir -p libs/mcp-server/data
+
 echo "→ Starte Docker-Container..."
 docker-compose up -d
 

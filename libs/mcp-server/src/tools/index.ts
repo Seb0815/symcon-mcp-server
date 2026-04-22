@@ -99,6 +99,57 @@ const setValueSchema = z.object({
 /** Root-Name für MCP-Automationen im Objektbaum (Ordnerkonvention: Thema, optional Raum). */
 const MCP_AUTOMATIONS_ROOT = 'MCP Automations';
 
+// ============================================================================
+// Tool Categories (used for access control in index.ts)
+// ============================================================================
+
+/**
+ * Access categories for MCP tools.
+ * - read:            Non-destructive read operations only.
+ * - control:         Device switching (RequestAction / SetValue).
+ * - knowledge-write: Learning / persisting device mappings and conventions.
+ * - automation:      Creating/running/deleting scripts and events.
+ */
+export type ToolCategory = 'read' | 'control' | 'knowledge-write' | 'automation';
+
+export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
+  symcon_ping:                    'read',
+  symcon_get_value:               'read',
+  symcon_get_object:              'read',
+  symcon_get_children:            'read',
+  symcon_get_object_id_by_name:   'read',
+  symcon_get_variable:            'read',
+  symcon_get_object_tree:         'read',
+  symcon_get_variable_by_path:    'read',
+  symcon_knowledge_get:           'read',
+  symcon_knowledge_get_control_rule: 'read',
+  symcon_resolve_device:          'read',
+  symcon_snapshot_variables:      'read',
+  symcon_diff_variables:          'read',
+  symcon_get_module_reference:    'read',
+  symcon_automation_list:         'read',
+  symcon_event_get:               'read',
+
+  symcon_set_value:               'control',
+  symcon_request_action:          'control',
+  symcon_control_device:          'control',
+  symcon_schedule_once:           'control',
+
+  symcon_knowledge_set:              'knowledge-write',
+  symcon_knowledge_set_convention:   'knowledge-write',
+  symcon_knowledge_set_control_rule: 'knowledge-write',
+  symcon_knowledge_correct_direction:'knowledge-write',
+
+  symcon_run_script:              'automation',
+  symcon_script_create:           'automation',
+  symcon_script_set_content:      'automation',
+  symcon_script_delete:           'automation',
+  symcon_event_create_cyclic:     'automation',
+  symcon_event_delete:            'automation',
+  symcon_automation_register:     'automation',
+  symcon_automation_unregister:   'automation',
+};
+
 function getArgs<T>(args: unknown): T {
   return args as T;
 }

@@ -24,7 +24,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SymconClient } from './symcon/SymconClient.js';
-import { createToolHandlers } from './tools/index.js';
+import { createToolHandlers, TOOL_CATEGORIES, type ToolCategory } from './tools/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,6 +52,67 @@ const HOST = process.env.MCP_BIND ?? '0.0.0.0';
 const USE_HTTPS = process.env.MCP_HTTPS === '1' || process.env.MCP_HTTPS === 'true';
 const TLS_CERT_PATH = process.env.MCP_TLS_CERT ?? join(process.cwd(), 'certs', 'server.crt');
 const TLS_KEY_PATH = process.env.MCP_TLS_KEY ?? join(process.cwd(), 'certs', 'server.key');
+
+// ============================================================================
+// Access Control Configuration
+// ============================================================================
+/**
+ * MCP_ACCESS_MODE controls which tool categories are exposed:
+ *   "read-only"  (default) – only read tools are active
+ *   "full"                 – all tools active
+ *   "custom"               – category flags + whitelist/blacklist apply
+ *
+ * Category flags (only used in "custom" mode):
+ *   MCP_ALLOW_CONTROL=true          – expose control tools (set_value, request_action, control_device, schedule_once)
+ *   MCP_ALLOW_KNOWLEDGE_WRITE=true  – expose knowledge-write tools
+ *   MCP_ALLOW_AUTOMATION=true       – expose automation/script tools
+ *
+ * Fine-grained overrides (comma-separated tool names):
+ *   MCP_TOOL_WHITELIST – explicitly allow these tools (highest priority)
+ *   MCP_TOOL_BLACKLIST – explicitly block these tools (applied after category resolution)
+ */
+const ACCESS_MODE = (process.env.MCP_ACCESS_MODE ?? 'read-only').toLowerCase() as 'read-only' | 'full' | 'custom';
+const ALLOW_CONTROL         = process.env.MCP_ALLOW_CONTROL?.toLowerCase() === 'true';
+const ALLOW_KNOWLEDGE_WRITE = process.env.MCP_ALLOW_KNOWLEDGE_WRITE?.toLowerCase() === 'true';
+const ALLOW_AUTOMATION      = process.env.MCP_ALLOW_AUTOMATION?.toLowerCase() === 'true';
+const TOOL_WHITELIST = process.env.MCP_TOOL_WHITELIST
+  ? new Set(process.env.MCP_TOOL_WHITELIST.split(',').map((s) => s.trim()).filter(Boolean))
+  : null;
+const TOOL_BLACKLIST = process.env.MCP_TOOL_BLACKLIST
+  ? new Set(process.env.MCP_TOOL_BLACKLIST.split(',').map((s) => s.trim()).filter(Boolean))
+  : null;
+
+function buildAllowedToolNames(allToolNames: string[]): Set<string> {
+  let allowed: Set<string>;
+
+  if (ACCESS_MODE === 'full') {
+    allowed = new Set(allToolNames);
+  } else if (ACCESS_MODE === 'read-only') {
+    allowed = new Set(allToolNames.filter((n) => TOOL_CATEGORIES[n] === 'read'));
+  } else {
+    // custom mode: start with read, then add enabled categories
+    const enabledCategories = new Set<ToolCategory>(['read']);
+    if (ALLOW_CONTROL)         enabledCategories.add('control');
+    if (ALLOW_KNOWLEDGE_WRITE) enabledCategories.add('knowledge-write');
+    if (ALLOW_AUTOMATION)      enabledCategories.add('automation');
+    allowed = new Set(allToolNames.filter((n) => {
+      const cat = TOOL_CATEGORIES[n];
+      return cat ? enabledCategories.has(cat) : true; // unknown tools pass through
+    }));
+  }
+
+  // Whitelist: explicitly add these (overrides mode restrictions)
+  if (TOOL_WHITELIST) {
+    for (const name of TOOL_WHITELIST) allowed.add(name);
+  }
+
+  // Blacklist: explicitly remove these (applied last)
+  if (TOOL_BLACKLIST) {
+    for (const name of TOOL_BLACKLIST) allowed.delete(name);
+  }
+
+  return allowed;
+}
 
 // ============================================================================
 // Debug Logging
@@ -265,7 +326,18 @@ async function main(): Promise<void> {
   );
 
   const handlers = createToolHandlers(client);
+  const allowedTools = buildAllowedToolNames(Object.keys(handlers));
+  const blockedTools = Object.keys(handlers).filter((n) => !allowedTools.has(n));
+
+  process.stderr.write(
+    `[ACCESS] Mode: ${ACCESS_MODE} | Active: ${allowedTools.size} tools | Blocked: ${blockedTools.length} tools\n`
+  );
+  if (blockedTools.length > 0) {
+    process.stderr.write(`[ACCESS] Blocked tools: ${blockedTools.join(', ')}\n`);
+  }
+
   for (const [name, { description, inputSchema, handler }] of Object.entries(handlers)) {
+    if (!allowedTools.has(name)) continue;
     mcp.registerTool(
       name,
       {
@@ -429,6 +501,7 @@ async function main(): Promise<void> {
         `║  Listening:   ${(scheme + '://' + HOST + ':' + PORT).padEnd(52)} ║\n` +
         `║  Symcon API:  ${SYMCON_API_URL.padEnd(52)} ║\n` +
         `║  Auth:        API key required (✓)${' '.padEnd(30)} ║\n` +
+        `║  Access:      ${ACCESS_MODE.padEnd(52)} ║\n` +
         `║  Health:      ${(scheme + '://' + HOST + ':' + PORT + '/health').padEnd(52)} ║\n` +
         `║  Endpoint:    ${(scheme + '://' + HOST + ':' + PORT + '/').padEnd(52)} ║\n` +
         '║                                                                       ║\n' +

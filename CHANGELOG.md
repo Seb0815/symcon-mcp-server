@@ -7,6 +7,59 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ---
 
+## [2.1.0] - 2026-04-22
+
+### 🔒 Sicherheit
+
+#### Konfigurierbare Tool-Zugriffsbeschränkung (Access Control)
+
+- **Standard ist jetzt `read-only`**
+  - Neue Deployments exponieren standardmäßig nur Lese-Tools
+  - KI-Client kann Geräte, Variablen und Objektbaum abfragen, aber keine Aktionen auslösen
+  - Schreib-/Steuerungstools müssen explizit freigeschaltet werden
+
+- **Neue Umgebungsvariable `MCP_ACCESS_MODE`**
+  - `read-only` (Standard) – nur 16 Lese-Tools aktiv
+  - `full` – alle ~42 Tools aktiv
+  - `custom` – Kategorien einzeln per Flag freischalten
+
+- **Kategorie-Flags (wirksam in `custom`-Modus)**
+  - `MCP_ALLOW_CONTROL=true` – Gerätsteuerung (`request_action`, `set_value`, `control_device`, `schedule_once`)
+  - `MCP_ALLOW_KNOWLEDGE_WRITE=true` – Wissensbasis schreiben (Gerätezuordnungen lernen)
+  - `MCP_ALLOW_AUTOMATION=true` – Skripte & Events erstellen/ausführen/löschen
+
+- **Feinsteuerung auf Tool-Ebene**
+  - `MCP_TOOL_WHITELIST` – kommagetrennte Tool-Namen explizit erlauben (höchste Priorität)
+  - `MCP_TOOL_BLACKLIST` – kommagetrennte Tool-Namen explizit sperren (wird zuletzt angewendet)
+
+- **Startup-Logging** – beim Start werden aktive und blockierte Tools in `docker logs` ausgegeben
+
+### ⚠️ BREAKING CHANGE für bestehende Deployments
+
+Wer bisher **alle Tools** (insbesondere Gerätesteuerung) genutzt hat, muss nach dem Update setzen:
+
+```env
+MCP_ACCESS_MODE=full
+```
+
+Andernfalls sind nach dem Update nur Lese-Tools verfügbar.
+
+### 📝 Dokumentation
+
+- `ANLEITUNG_INSTALLATION.md` – neuer Abschnitt „Schritt 5a: Zugriffs-Beschränkung"
+- `ANLEITUNG_INSTALLATION.md` – `X-MCP-API-Key`-Header-Format klargestellt: kein `Bearer`-Präfix
+- `ANLEITUNG_INSTALLATION.md` – Docker-Log-Befehle ergänzt (`docker logs` und `docker compose logs`)
+- `ANLEITUNG_INSTALLATION.md` – OpenWebUI/Halluzinations-Troubleshooting + Schnelltest-curl ergänzt
+- `local-config.env.example` – Access-Control-Abschnitt mit allen Vars und Kommentaren ergänzt
+- `.env.example` erstellt (fehlte bisher; Basis-Template für `scripts/setup-env.sh`)
+- `scripts/setup-env.sh` – interaktiver Prompt für `MCP_ACCESS_MODE` bei der Ersteinrichtung
+
+### 🐛 Bugfixes
+
+- `start-docker.sh` legt `libs/mcp-server/data/` automatisch an — Volume-Mount schlug bei frischem Clone fehl
+
+---
+
 ## [2.0.0] - 2026-02-18
 
 ### 🚀 BREAKING CHANGES

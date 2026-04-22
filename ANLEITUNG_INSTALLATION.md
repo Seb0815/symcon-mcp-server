@@ -176,6 +176,58 @@ Symcon startet dann den Node-Prozess (MCP-Server). **Wichtig:** Auf der SymBox m
 
 ---
 
+## Schritt 5a: Zugriffs-Beschränkung (Access Control)
+
+Standardmäßig sieht der KI-Client **nur Lese-Tools** (`read-only`-Modus). Er kann Variablen, Objekte und den Gerätebaum abfragen, aber **keine** Geräte schalten, keine Skripte ausführen und keine Automationen anlegen.
+
+Wollen Sie dem KI-Agenten mehr Rechte geben, setzen Sie in der `.env`-Datei die Variable `MCP_ACCESS_MODE`:
+
+| Wert | Bedeutung |
+|------|-----------|
+| `read-only` | **(Standard)** Nur Lesen. Kein Schalten, kein Skript-Ausführen. |
+| `full` | Alle Tools aktiv inkl. Gerätesteuerung, Skripte & Events. |
+| `custom` | Kategorien einzeln freischalten (siehe unten). |
+
+### Kategorien im `custom`-Modus
+
+```env
+MCP_ACCESS_MODE=custom
+
+# Gerätsteuerung (RequestAction, SetValue, control_device, schedule_once):
+MCP_ALLOW_CONTROL=true
+
+# Wissensbasis schreiben (Gerätezuordnungen lernen):
+MCP_ALLOW_KNOWLEDGE_WRITE=true
+
+# Skripte & Events erstellen/ausführen:
+MCP_ALLOW_AUTOMATION=false
+```
+
+### Feinsteuerung auf Tool-Ebene
+
+Einzelne Tools können unabhängig vom Modus explizit erlaubt oder gesperrt werden:
+
+```env
+# Nur diese Tools aktiv (höchste Priorität):
+MCP_TOOL_WHITELIST=symcon_ping,symcon_get_value
+
+# Diese Tools immer blockieren (auch in full-Modus):
+MCP_TOOL_BLACKLIST=symcon_run_script,symcon_script_create
+```
+
+**Priorität:** Whitelist → Blacklist → Modus/Kategorien.
+
+### Was ändert sich nach dem Anpassen?
+
+Bei Docker-Deployment: `./stop-docker.sh && ./start-docker.sh`. Der Server loggt beim Start welche Tools aktiv und welche blockiert sind:
+
+```
+[ACCESS] Mode: read-only | Active: 16 tools | Blocked: 26 tools
+[ACCESS] Blocked tools: symcon_set_value, symcon_request_action, …
+```
+
+---
+
 ## Schritt 6: Prüfen, ob der MCP-Server läuft
 
 - **Status auf der Einstellungsseite:** Oben auf der Instanzkonfiguration „MCP Server“ steht entweder **„✓ MCP-Server läuft auf Port … (PID: …)“** oder **„○ MCP-Server gestoppt“**. Beim Öffnen der Seite wird der Status aus der PID-Datei ermittelt.
@@ -184,7 +236,14 @@ Symcon startet dann den Node-Prozess (MCP-Server). **Wichtig:** Auf der SymBox m
   Von Ihrem Mac/PC aus direkt erreichbar unter **http://&lt;IP-der-SymBox&gt;:4096** (z. B. `http://&lt;SymBox-IP&gt;:4096`). Kein SSH-Tunnel nötig.
 
 - **Debug-Protokoll:** Bei der Instanz **„MCP Server“** den Tab **„Debug Protokoll“** öffnen und oben **„START“** klicken (damit Meldungen aufgezeichnet werden). Dann **„Änderungen übernehmen“** klicken – es erscheinen Meldungen wie „MCP-Server gestartet …“ oder „MCP-Server gestoppt“. Ohne START bleiben die Einträge leer. Zusätzlich: **„Meldungen“** / **„Nachrichten“** – dort erscheinen alle Log-Einträge mit Absender „MCPServer“.
+- **Docker-Logs anzeigen:**
+  ```bash
+  # Einzelner Container (direkt):
+  docker logs -f symcon-mcp-server
 
+  # Über Docker Compose (idiomatisch):
+  docker compose logs -f
+  ```
 ---
 
 ## MCP-Server testen
@@ -219,14 +278,31 @@ Erwartung: JSON-Antwort mit `result` (z. B. Server-Infos), kein „Connection 
 
 1. In Ihrem KI-Agenten (z. B. Claude): **Einstellungen** → **MCP** → **Server hinzufügen**.
 2. **Streamable HTTP**, URL: **http://&lt;SymBox-IP&gt;:4096** (SymBox-IP und Port anpassen).
-3. **Falls Sie einen API-Key in Symcon gesetzt haben:** Unter „Headers“ eintragen:  
-   - Name: `Authorization`, Wert: `Bearer IHR_API_KEY` (IHR_API_KEY durch den in Symcon konfigurierten Key ersetzen),  
-   - oder Name: `X-MCP-API-Key`, Wert: `IHR_API_KEY`.  
+3. **Falls Sie einen API-Key in Symcon gesetzt haben:** Unter „Headers" eintragen:
+
+   | Header-Name | Wert |
+   |---|---|
+   | `Authorization` | `Bearer IHR_API_KEY` |
+   | `X-MCP-API-Key` | `IHR_API_KEY` |
+
+   > **Wichtig:** Bei `X-MCP-API-Key` den Key **direkt** eintragen — **kein** `Bearer`-Präfix. `Bearer` gehört nur zum `Authorization`-Header.
+
    Ohne API-Key: Headers leer lassen.
 4. Speichern – der MCP-Client verbindet sich mit dem Symcon-MCP-Server; in Chats z. B. „Lies Variable 12345“ (mit echten IDs aus Symcon).
 
 **Claude: Erster Überblick + interaktiv reden** – Damit Claude beim ersten Mal „Gib mir ein paar Sekunden, ich schaue mir dein Smart Home an“ sagt und dann einen Überblick holt, siehe **docs/CLAUDE_EINBINDEN.md** (Custom Instructions / Anweisungen zum Kopieren).
+**OpenWebUI und andere selbst-gehostete KI-Frontends:** Wenn die KI Geräte und Räume erfindet, die nicht existieren, hat sie den Symcon-Objektbaum noch nie aktiv abgefragt — der MCP-Server liefert nur dann echte Daten, wenn der Agent die Tools explizit aufruft. Lösung: Im System-Prompt des Modells anweisen, bei Smart-Home-Fragen zuerst `symcon_get_object_tree` aufzurufen.
 
+**Schnelltest: Bekommt der Server überhaupt Daten von Symcon?**
+```bash
+curl -X POST http://<SERVER-IP>:4096 \
+  -H "Content-Type: application/json" \
+  -H "X-MCP-API-Key: IHR_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"symcon_ping","arguments":{}}}'
+```
+- Antwort enthält `"kernelVersion"` → Server kommuniziert erfolgreich mit Symcon ✓
+- HTTP `401` → API-Key-Header prüfen: Bei `X-MCP-API-Key` **kein** `Bearer`-Präfix verwenden
+- `Connection refused` → Container läuft nicht (`docker compose logs -f` prüfen)
 ### 4. Optional: Nur localhost (SSH-Tunnel)
 
 Wenn Sie den MCP-Server nur auf localhost der SymBox binden möchten, setzen Sie die Umgebungsvariable **MCP_BIND=127.0.0.1** (z. B. im Symcon-Modul beim Start des Node-Prozesses). Dann ist Zugriff von außen nur per SSH-Tunnel möglich: `ssh -L 4096:127.0.0.1:4096 BENUTZER@&lt;SymBox-IP&gt;`, danach **http://127.0.0.1:4096** nutzen.
@@ -269,8 +345,7 @@ Wenn Cursor sich nicht zur SymBox (z. B. &lt;SymBox-IP&gt;:4096) verbinden kan
 | In der Konsole: Instanz „MCP Server“ angelegt | ☐ |
 | Port (z. B. 4096), Symcon API URL `http://127.0.0.1:3777/api/`, optional API-Key, „Aktiv“ gesetzt | ☐ |
 | „Änderungen übernehmen“ geklickt | ☐ |
-| Bei API-Key: Claude/MCP-Client mit Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>` konfiguriert | ☐ |
-
+| Bei API-Key: Claude/MCP-Client mit Header `Authorization: Bearer <Key>` oder `X-MCP-API-Key: <Key>` konfiguriert | ☐ || Zugriffsmodus gewählt (`MCP_ACCESS_MODE` in `.env`, Standard: `read-only`) | ☐ |
 ---
 
 ## Typische Probleme (SymBox)

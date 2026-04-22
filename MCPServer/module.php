@@ -27,7 +27,7 @@ class MCPServer extends IPSModule
         IPS_SetIcon($this->GetIDForIdent('ConnectionStatus'), 'Network');
         
         // Timer for periodic connection checks (every 60 seconds)
-        $this->RegisterTimer('ConnectionCheck', 60000, 'MCPServer_CheckConnection($id);');
+        $this->RegisterTimer('ConnectionCheck', 60000, 'MCP_CheckConnection($_IPS[\'TARGET\']);');
     }
 
     public function Destroy(): void
@@ -190,46 +190,5 @@ class MCPServer extends IPSModule
     private function mcpLog(string $message): void
     {
         IPS_LogMessage('MCPServer', $message);
-    }
-}
-
-/**
- * Global function for testing the connection from WebFront/form.json
- * Symcon convention: {ModuleClass}_{ActionName}
- */
-function MCPServer_TestConnection(int $InstanceID): string
-{
-    try {
-        // Get the module instance from Symcon's internal registry
-        $instance = @IPS_GetInstance($InstanceID);
-        if (!is_array($instance)) {
-            return 'Fehler: Instanz nicht gefunden';
-        }
-        
-        // Create a temporary instance to call the method
-        // Note: This assumes the autoloader or include path is properly set
-        $module = new MCPServer($InstanceID);
-        return $module->TestConnection();
-    } catch (Throwable $e) {
-        return 'Fehler beim Verbindungstest: ' . $e->getMessage();
-    }
-}
-
-/**
- * Global function for periodic connection checks via timer
- * Symcon convention: {ModuleClass}_{ActionName}
- */
-function MCPServer_CheckConnection(int $InstanceID): void
-{
-    try {
-        $instance = @IPS_GetInstance($InstanceID);
-        if (!is_array($instance)) {
-            return;
-        }
-        
-        $module = new MCPServer($InstanceID);
-        $module->CheckConnection();
-    } catch (Throwable $e) {
-        IPS_LogMessage('MCPServer', 'Fehler beim Timer-Check: ' . $e->getMessage());
     }
 }
