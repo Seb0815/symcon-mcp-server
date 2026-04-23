@@ -49,35 +49,61 @@ openssl rand -hex 32
 
 ### 2. Rate Limiting
 
-**Ziel:** DoS-Angriffe und Brute-Force verhindern
+**Ziel:** DoS-Angriffe und Brute-Force verhindern; KI-Agents nicht durch zu enge Grenzen blockieren
 
 #### Konfiguration
 ```bash
 # .env
-MCP_RATE_LIMIT=100  # Requests pro Minute pro IP
+MCP_RATE_LIMIT=100          # Requests pro Fenster für unauthentifizierte Clients
+MCP_RATE_LIMIT_AUTH=1000    # Requests pro Fenster für authentifizierte Clients
+MCP_RATE_WINDOW_MS=60000    # Fenstergröße in Millisekunden (Standard: 60 s)
 ```
 
 #### Implementierung
-- In-Memory Map (IP → Request-Count)
-- Rolling Window (60 Sekunden)
-- HTTP 429 "Too Many Requests" bei Überschreitung
-- `Retry-After` Header mit Sekunden bis Reset
+- **Sliding Window** (kein Fixed Window): Timestamps-Array pro Client-Key. Nur Requests innerhalb der letzten `MCP_RATE_WINDOW_MS` Millisekunden zählen. Keine harten Sperren am Fenster-Ende.
+- **Zwei Tier-Stufen**: Unauthentifizierte Requests (Brute-Force-Schutz) vs. authentifizierte Requests (KI-Agent). Auth-Check ist constant-time und unabhängig vom nachgelagerten `isAuthorized()`.
+- HTTP 429 bei Überschreitung mit `Retry-After` Header.
+
+#### Warum Sliding Window?
+
+Ein Fixed Window blockiert einen KI-Agent, der 40 Tool-Calls in 10 Sekunden macht, für die restlichen 50 Sekunden des Fensters – auch wenn danach keine weiteren Requests kommen. Das Sliding Window schiebt sich mit jedem Request, so dass der Agent nach einer kurzen Burst-Phase normal weiterarbeiten kann.
 
 #### Beispiel-Response
 ```http
 HTTP/1.1 429 Too Many Requests
-Retry-After: 45
-X-RateLimit-Limit: 100
-X-RateLimit-Reset: 45
+Retry-After: 12
+X-RateLimit-Limit: 1000
+X-RateLimit-Reset: 12
 
 {
   "error": "Too Many Requests",
-  "message": "Rate limit exceeded. Maximum 100 requests per minute.",
-  "retryAfter": 45
+  "message": "Rate limit exceeded. Maximum 1000 requests per 60s window.",
+  "retryAfter": 12
 }
 ```
 
-**Limitation:** Rate Limiting ist pro Container-Instanz. Bei Container-Restart wird der Counter zurückgesetzt.
+**Limitation:** Rate Limiting ist In-Memory, pro Container-Instanz. Bei Container-Restart wird der Counter zurückgesetzt.
+
+---
+
+### 2a. Symcon-Lastschutz (Concurrency Limiter)
+
+**Ziel:** Symcon-API vor parallelen RPC-Fluten schützen, auch bei legalen KI-Abfragen (z. B. `symcon_get_object_tree` mit tiefen Bäumen)
+
+#### Konfiguration
+```bash
+# .env
+MCP_SYMCON_CONCURRENCY=5    # Max. gleichzeitige HTTP-Calls zur Symcon-API (Standard: 5)
+MCP_MAX_TREE_NODES=500      # Max. Knoten bei get_object_tree-Traversal (Standard: 500)
+```
+
+#### Implementierung
+- **Semaphor** in `SymconClient.call()`: Jeder ausgehende RPC-Call muss ein Slot belegen. Weitere Calls warten in einer Queue bis ein Slot frei wird. Funktioniert transparent für alle Tools.
+- **Node-Limit bei Tree-Traversal**: `symcon_get_object_tree` zählt besuchte Knoten. Bei Überschreitung von `MCP_MAX_TREE_NODES` wird der Teilbaum abgeschnitten; das Ergebnis enthält eine Warnung.
+
+#### Warum ist das nötig?
+
+`symcon_get_object_tree` ruft rekursiv `Promise.all()` auf alle Kind-IDs auf. Bei einem typischen Smart-Home-Baum (Tiefe 4, viele Räume) können das **50–200 gleichzeitige RPC-Calls** sein – ohne Semaphor. Mit `MCP_SYMCON_CONCURRENCY=5` gehen unabhängig von der Baumgröße maximal 5 Requests gleichzeitig raus.
 
 ---
 

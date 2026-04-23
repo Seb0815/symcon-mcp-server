@@ -6,6 +6,41 @@
 const DEFAULT_TIMEOUT_MS = 10000;
 
 // ============================================================================
+// Concurrency Limiter (Semaphore)
+// Caps simultaneous outbound RPC calls to Symcon to prevent overload.
+// Configure via MCP_SYMCON_CONCURRENCY (default: 5).
+// ============================================================================
+class Semaphore {
+  private count: number;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(max: number) {
+    this.count = Math.max(1, max);
+  }
+
+  acquire(): Promise<void> {
+    if (this.count > 0) {
+      this.count--;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    } else {
+      this.count++;
+    }
+  }
+}
+
+const SYMCON_CONCURRENCY = Math.max(1, parseInt(process.env.MCP_SYMCON_CONCURRENCY ?? '5', 10));
+
+// ============================================================================
 // Debug Logging (shared with index.ts via env var)
 // ============================================================================
 const LOG_LEVEL = (process.env.MCP_LOG_LEVEL ?? 'info').toLowerCase();
@@ -33,6 +68,7 @@ export class SymconClient {
   private readonly timeoutMs: number;
   private requestId = 0;
   private readonly authHeader?: { name: string; value: string };
+  private readonly semaphore = new Semaphore(SYMCON_CONCURRENCY);
 
   constructor(baseUrl: string, timeoutMs: number = DEFAULT_TIMEOUT_MS, auth?: SymconAuth) {
     const trimmed = baseUrl.trim();
@@ -75,6 +111,7 @@ export class SymconClient {
       debugLog('SYMCON-RPC', `[FAIL] Request #${id} TIMEOUT after ${this.timeoutMs}ms`);
       controller.abort();
     }, this.timeoutMs);
+    await this.semaphore.acquire();
     try {
       const res = await fetch(this.baseUrl, {
         method: 'POST',
@@ -130,6 +167,8 @@ export class SymconClient {
       }
       debugLog('SYMCON-RPC', `[FAIL] Request #${id} failed (${duration}ms): ${String(err)}`);
       throw new Error(String(err));
+    } finally {
+      this.semaphore.release();
     }
   }
 

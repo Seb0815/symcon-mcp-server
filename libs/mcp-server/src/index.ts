@@ -239,43 +239,72 @@ function readBody(req: import('node:http').IncomingMessage): Promise<unknown> {
 }
 
 // ============================================================================
-// Rate Limiting
+// Rate Limiting (Sliding Window)
 // ============================================================================
+/** Max requests per window for unauthenticated clients (brute-force guard). */
 const RATE_LIMIT = parseInt(process.env.MCP_RATE_LIMIT ?? '100', 10);
-const RATE_WINDOW_MS = 60 * 1000; // 1 minute
+/** Max requests per window for authenticated clients. Default is generous for AI agents. */
+const RATE_LIMIT_AUTH = parseInt(process.env.MCP_RATE_LIMIT_AUTH ?? '1000', 10);
+/** Sliding window size in milliseconds. */
+const RATE_WINDOW_MS = parseInt(process.env.MCP_RATE_WINDOW_MS ?? String(60 * 1000), 10);
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
+// Per client key: sorted array of request timestamps within the sliding window.
+const rateLimitMap = new Map<string, number[]>();
 
-const rateLimitMap = new Map<string, RateLimitEntry>();
-
-// Cleanup old entries every 60 seconds
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap.entries()) {
-    if (entry.resetAt < now) {
-      rateLimitMap.delete(ip);
+// Prune stale entries periodically to prevent unbounded memory growth.
+const _rateLimitCleanup = setInterval(() => {
+  const cutoff = Date.now() - RATE_WINDOW_MS;
+  for (const [key, timestamps] of rateLimitMap.entries()) {
+    const pruned = timestamps.filter((t) => t > cutoff);
+    if (pruned.length === 0) {
+      rateLimitMap.delete(key);
+    } else {
+      rateLimitMap.set(key, pruned);
     }
   }
-}, 60000);
+}, 60_000);
+// Allow Node.js to exit even if the interval is still pending.
+if (_rateLimitCleanup.unref) _rateLimitCleanup.unref();
 
-function checkRateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
+/**
+ * Lightweight auth-header check used *only* for rate-limit tier selection.
+ * Does NOT replace the full isAuthorized() check performed later.
+ */
+function hasValidAuthToken(req: IncomingMessage): boolean {
+  if (!MCP_AUTH_TOKEN) return true;
+  const authHeader = req.headers.authorization;
+  const apiKeyHeader = req.headers['x-mcp-api-key'];
+  const bearer =
+    typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+  const key = typeof apiKeyHeader === 'string' ? apiKeyHeader.trim() : '';
+  if (bearer && constantTimeEqual(bearer, MCP_AUTH_TOKEN)) return true;
+  if (key && constantTimeEqual(key, MCP_AUTH_TOKEN)) return true;
+  return false;
+}
+
+function checkRateLimit(
+  ip: string,
+  authenticated: boolean,
+): { allowed: boolean; retryAfter?: number } {
   const now = Date.now();
-  const entry = rateLimitMap.get(ip);
+  const cutoff = now - RATE_WINDOW_MS;
+  const limit = authenticated ? RATE_LIMIT_AUTH : RATE_LIMIT;
+  const key = `${authenticated ? 'auth' : 'unauth'}:${ip}`;
 
-  if (!entry || entry.resetAt < now) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return { allowed: true };
-  }
+  // Filter out timestamps that have left the sliding window.
+  const timestamps = (rateLimitMap.get(key) ?? []).filter((t) => t > cutoff);
 
-  if (entry.count >= RATE_LIMIT) {
-    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+  if (timestamps.length >= limit) {
+    // Retry after the oldest in-window entry expires.
+    const retryAfter = Math.max(1, Math.ceil((timestamps[0] + RATE_WINDOW_MS - now) / 1000));
+    rateLimitMap.set(key, timestamps);
     return { allowed: false, retryAfter };
   }
 
-  entry.count++;
+  timestamps.push(now);
+  rateLimitMap.set(key, timestamps);
   return { allowed: true };
 }
 
@@ -375,20 +404,25 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Rate limiting (check before auth to prevent brute force)
-    const rateCheck = checkRateLimit(clientIp);
+    // Rate limiting (check before auth to prevent brute force).
+    // Authenticated clients get a much higher limit (MCP_RATE_LIMIT_AUTH).
+    const authenticated = hasValidAuthToken(req);
+    const activeLimit = authenticated ? RATE_LIMIT_AUTH : RATE_LIMIT;
+    const rateCheck = checkRateLimit(clientIp, authenticated);
     if (!rateCheck.allowed) {
       res.writeHead(429, {
         'Content-Type': 'application/json',
         'Retry-After': String(rateCheck.retryAfter),
-        'X-RateLimit-Limit': String(RATE_LIMIT),
-        'X-RateLimit-Reset': String(rateCheck.retryAfter)
+        'X-RateLimit-Limit': String(activeLimit),
+        'X-RateLimit-Reset': String(rateCheck.retryAfter),
       });
-      res.end(JSON.stringify({
-        error: 'Too Many Requests',
-        message: `Rate limit exceeded. Maximum ${RATE_LIMIT} requests per minute.`,
-        retryAfter: rateCheck.retryAfter
-      }));
+      res.end(
+        JSON.stringify({
+          error: 'Too Many Requests',
+          message: `Rate limit exceeded. Maximum ${activeLimit} requests per ${RATE_WINDOW_MS / 1000}s window.`,
+          retryAfter: rateCheck.retryAfter,
+        }),
+      );
       return;
     }
 

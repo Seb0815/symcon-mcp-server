@@ -11,6 +11,11 @@ import { getKnowledgeStore } from '../knowledge/KnowledgeStore.js';
 import { getAutomationStore } from '../knowledge/AutomationStore.js';
 import { z } from 'zod';
 
+// Max nodes visited during a single get_object_tree traversal.
+// Prevents unbounded recursion on very large Symcon installations.
+// Configure via MCP_MAX_TREE_NODES (default: 500).
+const MAX_TREE_NODES = Math.max(10, parseInt(process.env.MCP_MAX_TREE_NODES ?? '500', 10));
+
 // ============================================================================
 // Audit Logging
 // ============================================================================
@@ -252,7 +257,14 @@ export function createToolHandlers(client: SymconClient): Record<string, { descr
       handler: async (args: HandlerArgs) => {
         const { rootId = 0, maxDepth = 4 } = getArgs<{ rootId?: number; maxDepth?: number }>(args);
         type TreeNode = { ObjectID: number; Name: string; ObjectType: number; children: TreeNode[] };
+        let nodeCount = 0;
+        let limitReached = false;
         const buildTree = async (id: number, depth: number): Promise<TreeNode> => {
+          nodeCount++;
+          if (nodeCount > MAX_TREE_NODES) {
+            limitReached = true;
+            return { ObjectID: id, Name: `(Limit: max ${MAX_TREE_NODES} Knoten)`, ObjectType: -1, children: [] };
+          }
           let name = 'Root';
           let objectType = 0;
           if (id > 0) {
@@ -272,15 +284,17 @@ export function createToolHandlers(client: SymconClient): Record<string, { descr
           return { ObjectID: id, Name: name, ObjectType: objectType, children };
         };
         const tree = await buildTree(rootId, 0);
+        const warning = limitReached
+          ? `\n\n⚠️ Baum wurde bei ${MAX_TREE_NODES} Knoten abgeschnitten. Für mehr Knoten MCP_MAX_TREE_NODES erhöhen oder rootId auf einen Teilbaum setzen.`
+          : '';
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(
-                tree,
-                null,
-                2
-              ) + '\n\nObjectType: 0=Kategorie, 1=Instanz, 2=Variable. Bei Variable: ObjectID = VariableID für SetValue/RequestAction.',
+              text:
+                JSON.stringify(tree, null, 2) +
+                '\n\nObjectType: 0=Kategorie, 1=Instanz, 2=Variable. Bei Variable: ObjectID = VariableID für SetValue/RequestAction.' +
+                warning,
             },
           ],
         };
