@@ -134,6 +134,7 @@ export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   symcon_get_module_reference:    'read',
   symcon_automation_list:         'read',
   symcon_event_get:               'read',
+  symcon_script_get_content:      'read',
 
   symcon_set_value:               'control',
   symcon_request_action:          'control',
@@ -217,6 +218,15 @@ export function createToolHandlers(client: SymconClient): Record<string, { descr
         const { objectId } = getArgs<z.infer<typeof parentIdSchema>>(args);
         const ids = await client.getChildrenIds(objectId);
         return { content: [{ type: 'text', text: JSON.stringify(ids) }] };
+      },
+    },
+    symcon_script_get_content: {
+      description: 'Liest den Inhalt (PHP-Code) eines Symcon-Skripts (IPS_GetScriptContent).',
+      inputSchema: scriptIdSchema,
+      handler: async (args: HandlerArgs) => {
+        const { scriptId } = getArgs<z.infer<typeof scriptIdSchema>>(args);
+        const content = await client.getScriptContent(scriptId);
+        return { content: [{ type: 'text', text: content }] };
       },
     },
     symcon_run_script: {

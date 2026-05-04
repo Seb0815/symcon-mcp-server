@@ -223,6 +223,7 @@ git pull
 
 **Automationen:**
 - `symcon_schedule_once` – Einmaliger Timer
+- `symcon_script_get_content` – PHP-Skript-Inhalt lesen
 - `symcon_script_create` – PHP-Skript erstellen
 - `symcon_event_create_cyclic` – Zyklisches Event
 
